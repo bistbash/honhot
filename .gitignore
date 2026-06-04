@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+*.manifest
+*.spec.bak
+
+# Virtual environments
+.venv/
+.venv~/
+venv/
+ENV/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# PyInstaller
+*.spec.log
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local secrets and data (DB lives under AppData at runtime)
+.env
+.env.*
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log

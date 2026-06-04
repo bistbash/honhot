@@ -1,0 +1,200 @@
+/* ============================================================
+   Dark theme - sleek, low-glare, professional Windows look
+   ============================================================ */
+* {
+    font-family: "Segoe UI", "Arial";
+    font-size: 14px;
+}
+
+QMainWindow, QWidget {
+    background-color: #161a24;
+    color: #e6e9f0;
+}
+
+/* ----- Toolbar / header ----- */
+QToolBar {
+    background-color: #1e2230;
+    border: none;
+    border-bottom: 1px solid #2f3548;
+    spacing: 8px;
+    padding: 8px 12px;
+}
+
+QToolBar QToolButton {
+    background: transparent;
+    color: #c2cae0;
+    border-radius: 6px;
+    padding: 7px 12px;
+    font-weight: 600;
+}
+
+QToolBar QToolButton:hover {
+    background: #2c3346;
+    color: #ffffff;
+}
+
+QToolBar::separator {
+    background: #2f3548;
+    width: 1px;
+    margin: 4px 6px;
+}
+
+#appTitle {
+    font-size: 17px;
+    font-weight: 800;
+    color: #6ea8fe;
+}
+
+QStatusBar {
+    background-color: #1e2230;
+    border-top: 1px solid #2f3548;
+    color: #9aa4bd;
+}
+
+/* ----- Tabs ----- */
+QTabWidget::pane {
+    border: 1px solid #2f3548;
+    border-radius: 10px;
+    background: #1e2230;
+    top: -1px;
+}
+
+QTabBar::tab {
+    background: transparent;
+    color: #9aa4bd;
+    padding: 10px 20px;
+    border: none;
+    margin: 3px 2px;
+    font-weight: 600;
+}
+
+QTabBar::tab:selected {
+    background: #3b82f6;
+    color: #ffffff;
+    border-radius: 8px;
+}
+
+QTabBar::tab:hover:!selected {
+    background: #2c3346;
+    border-radius: 8px;
+}
+
+/* ----- Buttons ----- */
+QPushButton {
+    background-color: #3b82f6;
+    color: #ffffff;
+    border: none;
+    border-radius: 8px;
+    padding: 9px 18px;
+    font-weight: 600;
+}
+
+QPushButton:hover { background-color: #2f6fe0; }
+QPushButton:pressed { background-color: #265bc0; }
+QPushButton:disabled { background-color: #39415a; color: #6b7591; }
+
+QPushButton[flat="true"], QPushButton.secondary {
+    background-color: #232838;
+    color: #6ea8fe;
+    border: 1px solid #36507e;
+}
+QPushButton.secondary:hover { background-color: #2a3247; border-color: #3b82f6; }
+
+/* ----- Inputs ----- */
+QLineEdit, QComboBox, QSpinBox {
+    background-color: #2b3145;
+    border: 1px solid #3a4159;
+    border-radius: 8px;
+    padding: 7px 9px;
+    color: #e6e9f0;
+    min-height: 18px;
+}
+
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus { border: 1px solid #3b82f6; }
+QComboBox::drop-down { border: none; width: 22px; }
+
+QCheckBox { spacing: 6px; }
+QCheckBox::indicator {
+    width: 18px; height: 18px;
+    border: 1px solid #3a4159; border-radius: 5px;
+    background: #2b3145;
+}
+QCheckBox::indicator:checked { background: #3b82f6; border-color: #3b82f6; }
+
+/* ----- Tables / lists ----- */
+QTableView, QListWidget, QTreeView {
+    background-color: #1e2230;
+    border: 1px solid #2f3548;
+    border-radius: 10px;
+    gridline-color: #2a3042;
+    selection-background-color: #2f4a7a;
+    selection-color: #ffffff;
+    alternate-background-color: #222736;
+}
+
+QTableView::item, QListWidget::item { padding: 4px; }
+QListWidget::item:selected { background: #2f4a7a; color: #ffffff; border-radius: 4px; }
+
+QHeaderView::section {
+    background-color: #2b3145;
+    color: #c2cae0;
+    padding: 9px;
+    border: none;
+    border-right: 1px solid #2f3548;
+    border-bottom: 1px solid #2f3548;
+    font-weight: 700;
+}
+
+QTableCornerButton::section { background: #2b3145; border: none; }
+
+/* ----- Group boxes ----- */
+QGroupBox {
+    border: 1px solid #2f3548;
+    border-radius: 10px;
+    margin-top: 16px;
+    background: #1e2230;
+    font-weight: 700;
+    padding-top: 8px;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    right: 14px;
+    padding: 0 6px;
+    color: #6ea8fe;
+}
+
+/* ----- Progress bars ----- */
+QProgressBar {
+    border: none;
+    border-radius: 8px;
+    background: #2b3145;
+    height: 18px;
+    text-align: center;
+    color: #e6e9f0;
+    font-weight: 600;
+}
+QProgressBar::chunk { border-radius: 8px; background: #3b82f6; }
+
+/* ----- Dashboard KPI cards ----- */
+#kpiCard {
+    background: #232838;
+    border: 1px solid #2f3548;
+    border-radius: 12px;
+}
+#kpiValue {
+    font-size: 30px;
+    font-weight: 800;
+    color: #6ea8fe;
+}
+#kpiCaption { color: #9aa4bd; font-weight: 600; }
+#pageTitle { font-size: 22px; font-weight: 800; color: #e6e9f0; }
+
+/* ----- Scrollbars ----- */
+QScrollBar:vertical { background: transparent; width: 12px; margin: 2px; }
+QScrollBar::handle:vertical { background: #3a4159; border-radius: 6px; min-height: 30px; }
+QScrollBar::handle:vertical:hover { background: #4a5474; }
+QScrollBar:horizontal { background: transparent; height: 12px; margin: 2px; }
+QScrollBar::handle:horizontal { background: #3a4159; border-radius: 6px; min-width: 30px; }
+QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
