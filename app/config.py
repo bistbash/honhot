@@ -42,10 +42,17 @@ LEVEL_MAX: Final[int] = 5
 
 # --- Excel import column headers (Hebrew) ------------------------------------
 COL_NAME: Final[str] = "שם תלמיד"
+COL_NATIONAL_ID: Final[str] = "ת.ז."
 COL_CLASS: Final[str] = "כיתה"
 COL_UNITS: Final[str] = 'יח"ל'
 COL_LEVEL: Final[str] = "רמת לימוד"
-REQUIRED_COLUMNS: Final[list[str]] = [COL_NAME, COL_CLASS, COL_UNITS, COL_LEVEL]
+REQUIRED_COLUMNS: Final[list[str]] = [
+    COL_NAME,
+    COL_NATIONAL_ID,
+    COL_CLASS,
+    COL_UNITS,
+    COL_LEVEL,
+]
 
 # --- Drag & drop MIME type ----------------------------------------------------
 ENTITY_MIME_TYPE: Final[str] = "application/x-tutoring-entity"

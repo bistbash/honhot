@@ -16,6 +16,7 @@ from app.config import (
     COL_CLASS,
     COL_LEVEL,
     COL_NAME,
+    COL_NATIONAL_ID,
     COL_UNITS,
     GRADE_TET,
     GRADE_YA,
@@ -27,6 +28,7 @@ from app.config import (
     UNITS_MAX,
     UNITS_MIN,
 )
+from app.services.national_id import validate_national_id
 
 # Maps the bare Hebrew letter prefix to its canonical, punctuated grade label.
 # Longer prefixes must be checked first (יא/יב before י).
@@ -49,6 +51,7 @@ class ParsedStudent:
     """A single validated student row ready to be persisted."""
 
     name: str
+    national_id: str
     grade: str
     class_number: int
     units: int
@@ -164,6 +167,13 @@ def parse_workbook(path: str | Path) -> ImportResult:
             result.issues.append(RowIssue(row_number, "חסר שם תלמיד"))
             continue
 
+        id_raw = row.get(COL_NATIONAL_ID)
+        try:
+            national_id = validate_national_id("" if id_raw is None else str(id_raw))
+        except ValueError as exc:
+            result.issues.append(RowIssue(row_number, f"{name}: {exc}"))
+            continue
+
         try:
             grade, class_number = parse_class_token(row.get(COL_CLASS))
         except ValueError as exc:
@@ -202,6 +212,7 @@ def parse_workbook(path: str | Path) -> ImportResult:
         result.students.append(
             ParsedStudent(
                 name=name,
+                national_id=national_id,
                 grade=grade,
                 class_number=class_number,
                 units=units,
@@ -230,10 +241,10 @@ def write_template(path: str | Path) -> Path:
 
     headers = list(REQUIRED_COLUMNS)  # [שם תלמיד, כיתה, יח"ל, רמת לימוד]
     examples = [
-        ["דנה כהן", 'י"א2', 5, 4],
-        ["יוסי לוי", "י1", 4, 3],
-        ["מאיה ישראלי", "ט'3", 3, 5],
-        ["אבי דוד", "יב2", 5, 4],
+        ["דנה כהן", "123456782", 'י"א2', 5, 4],
+        ["יוסי לוי", "111111118", "י1", 4, 3],
+        ["מאיה ישראלי", "000000018", "ט'3", 3, 5],
+        ["אבי דוד", "123456782", "יב2", 5, 4],
     ]
 
     sheet.append(headers)

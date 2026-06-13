@@ -11,6 +11,7 @@ from app.config import GRADES, LEVEL_MAX, LEVEL_MIN, UNITS_MAX, UNITS_MIN
 from app.database import session_scope
 from app.models import Student, Subject, Tutor
 from app.services.excel_parser import ImportResult, parse_workbook, write_template
+from app.services.national_id import validate_national_id
 
 
 @dataclass
@@ -31,14 +32,16 @@ class StudentUpdateResult:
 
 def _validate_student_fields(
     name: str,
+    national_id: str,
     grade: str,
     class_number: int,
     units: int,
     study_level: int,
-) -> None:
+) -> str:
     name = name.strip()
     if not name:
         raise ValueError("יש להזין שם תלמיד")
+    normalized_id = validate_national_id(national_id)
     if grade not in GRADES:
         raise ValueError(f"שכבה לא חוקית: {grade}")
     if not 1 <= class_number <= 15:
@@ -47,6 +50,7 @@ def _validate_student_fields(
         raise ValueError(f'יח"ל חייב להיות בין {UNITS_MIN} ל-{UNITS_MAX}')
     if not LEVEL_MIN <= study_level <= LEVEL_MAX:
         raise ValueError(f"רמת לימוד חייבת להיות בין {LEVEL_MIN} ל-{LEVEL_MAX}")
+    return normalized_id
 
 
 class ImportController:
@@ -85,6 +89,7 @@ class ImportController:
                 session.add(
                     Student(
                         name=parsed.name,
+                        national_id=parsed.national_id,
                         grade=parsed.grade,
                         class_number=parsed.class_number,
                         units=parsed.units,
@@ -117,6 +122,7 @@ class ImportController:
                 {
                     "id": s.id,
                     "name": s.name,
+                    "national_id": s.national_id,
                     "grade": s.grade,
                     "class_number": s.class_number,
                     "units": s.units,
@@ -154,6 +160,7 @@ class ImportController:
             return {
                 "id": s.id,
                 "name": s.name,
+                "national_id": s.national_id,
                 "grade": s.grade,
                 "class_number": s.class_number,
                 "units": s.units,
@@ -171,6 +178,7 @@ class ImportController:
         self,
         subject_id: int,
         name: str,
+        national_id: str,
         grade: str,
         class_number: int,
         units: int,
@@ -178,7 +186,9 @@ class ImportController:
         preferred_tutor_id: int | None = None,
     ) -> int:
         """Create a student manually under a subject. Returns the new student id."""
-        _validate_student_fields(name, grade, class_number, units, study_level)
+        normalized_id = _validate_student_fields(
+            name, national_id, grade, class_number, units, study_level
+        )
         with session_scope() as session:
             subject = session.get(Subject, subject_id)
             if subject is None:
@@ -188,6 +198,7 @@ class ImportController:
                     raise ValueError("החונכת לא נמצאה")
             student = Student(
                 name=name.strip(),
+                national_id=normalized_id,
                 grade=grade,
                 class_number=class_number,
                 units=units,
@@ -203,6 +214,7 @@ class ImportController:
         self,
         student_id: int,
         name: str,
+        national_id: str,
         grade: str,
         class_number: int,
         units: int,
@@ -210,7 +222,9 @@ class ImportController:
         preferred_tutor_id: int | None = None,
     ) -> StudentUpdateResult:
         """Update a student. Removes from group if grade/units/level change."""
-        _validate_student_fields(name, grade, class_number, units, study_level)
+        normalized_id = _validate_student_fields(
+            name, national_id, grade, class_number, units, study_level
+        )
         result = StudentUpdateResult()
         with session_scope() as session:
             student = session.get(Student, student_id)
@@ -233,6 +247,7 @@ class ImportController:
                     result.removed_from_group = True
 
             student.name = name.strip()
+            student.national_id = normalized_id
             student.grade = grade
             student.class_number = class_number
             student.units = units

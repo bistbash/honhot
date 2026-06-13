@@ -10,7 +10,7 @@ timetable. Built with Python + PySide6, SQLite/SQLAlchemy and Pandas.
 ## Features
 
 - **ייבוא אקסל** — import a subject's students from `.xlsx`. Required columns:
-  `שם תלמיד`, `כיתה`, `יח"ל`, `רמת לימוד`. The `כיתה` token (e.g. `י"ב4`, `ט'1`)
+  `שם תלמיד`, `ת.ז.`, `כיתה`, `יח"ל`, `רמת לימוד`. The `כיתה` token (e.g. `י"ב4`, `ט'1`)
   is parsed into a grade (`שכבה`) and a class number, with per-row validation and
   professional error dialogs.
 - **קבוצות לימוד** — a smart engine suggests groups of students that share the

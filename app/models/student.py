@@ -27,6 +27,7 @@ class Student(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
+    national_id: Mapped[str] = mapped_column(String(9), nullable=False, index=True)
     grade: Mapped[str] = mapped_column(String(8), nullable=False)  # שכבה
     class_number: Mapped[int] = mapped_column(Integer, nullable=False)  # מספר כיתה
     units: Mapped[int] = mapped_column(Integer, nullable=False)  # יח"ל (1-5)
@@ -51,7 +52,9 @@ class Student(Base):
     @property
     def display_label(self) -> str:
         """Human-readable label used in lists and the timetable grid."""
-        return f"{self.name} ({self.grade}{self.class_number})"
+        return (
+            f"{self.name} ({self.grade}{self.class_number}) · ת.ז. {self.national_id}"
+        )
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return (

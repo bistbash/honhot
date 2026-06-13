@@ -11,6 +11,7 @@ from app.config import (
     COL_CLASS,
     COL_LEVEL,
     COL_NAME,
+    COL_NATIONAL_ID,
     COL_UNITS,
     GRADE_TET,
     GRADE_YA,
@@ -23,6 +24,7 @@ from app.services.excel_parser import (
     parse_workbook,
     write_template,
 )
+from tests.student_ids import ID_DANI, ID_GENERIC
 
 
 @pytest.mark.parametrize(
@@ -49,6 +51,16 @@ def test_parse_class_token_invalid(token: str) -> None:
         parse_class_token(token)
 
 
+def test_write_template_includes_national_id_column(tmp_path: Path) -> None:
+    path = tmp_path / "template.xlsx"
+    write_template(path)
+    from openpyxl import load_workbook
+
+    ws = load_workbook(path).active
+    headers = [ws.cell(row=1, column=c).value for c in range(1, 6)]
+    assert COL_NATIONAL_ID in headers
+
+
 def test_write_template_is_valid_and_parseable(tmp_path: Path) -> None:
     """The generated template must import cleanly with no issues."""
     path = tmp_path / "template.xlsx"
@@ -72,8 +84,20 @@ def test_parse_workbook_success(tmp_path: Path) -> None:
     _write_workbook(
         path,
         [
-            {COL_NAME: "דני", COL_CLASS: "יא2", COL_UNITS: 5, COL_LEVEL: 4},
-            {COL_NAME: "רותם", COL_CLASS: 'י"ב4', COL_UNITS: 3, COL_LEVEL: 2},
+            {
+                COL_NAME: "דני",
+                COL_NATIONAL_ID: ID_DANI,
+                COL_CLASS: "יא2",
+                COL_UNITS: 5,
+                COL_LEVEL: 4,
+            },
+            {
+                COL_NAME: "רותם",
+                COL_NATIONAL_ID: ID_GENERIC,
+                COL_CLASS: 'י"ב4',
+                COL_UNITS: 3,
+                COL_LEVEL: 2,
+            },
         ],
     )
     result = parse_workbook(path)
@@ -88,9 +112,27 @@ def test_parse_workbook_reports_row_issues(tmp_path: Path) -> None:
     _write_workbook(
         path,
         [
-            {COL_NAME: "תקין", COL_CLASS: "ט1", COL_UNITS: 5, COL_LEVEL: 3},
-            {COL_NAME: "יחל גבוה", COL_CLASS: "ט1", COL_UNITS: 9, COL_LEVEL: 3},
-            {COL_NAME: "כיתה פגומה", COL_CLASS: "???", COL_UNITS: 5, COL_LEVEL: 3},
+            {
+                COL_NAME: "תקין",
+                COL_NATIONAL_ID: ID_DANI,
+                COL_CLASS: "ט1",
+                COL_UNITS: 5,
+                COL_LEVEL: 3,
+            },
+            {
+                COL_NAME: "יחל גבוה",
+                COL_NATIONAL_ID: ID_GENERIC,
+                COL_CLASS: "ט1",
+                COL_UNITS: 9,
+                COL_LEVEL: 3,
+            },
+            {
+                COL_NAME: "כיתה פגומה",
+                COL_NATIONAL_ID: "123456789",
+                COL_CLASS: "???",
+                COL_UNITS: 5,
+                COL_LEVEL: 3,
+            },
         ],
     )
     result = parse_workbook(path)
@@ -100,6 +142,6 @@ def test_parse_workbook_reports_row_issues(tmp_path: Path) -> None:
 
 def test_parse_workbook_missing_columns(tmp_path: Path) -> None:
     path = tmp_path / "missing.xlsx"
-    _write_workbook(path, [{COL_NAME: "דני", COL_CLASS: "ט1"}])
+    _write_workbook(path, [{COL_NAME: "דני", COL_NATIONAL_ID: ID_DANI, COL_CLASS: "ט1"}])
     with pytest.raises(ExcelImportError):
         parse_workbook(path)

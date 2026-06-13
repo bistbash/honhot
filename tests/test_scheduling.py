@@ -10,6 +10,7 @@ from app.controllers.subject_controller import SubjectController
 from app.controllers.tutor_controller import TutorController
 from app.database import session_scope
 from app.models import EntityType, ScheduleSlot, Student, Subject, Tutor
+from tests.student_ids import ID_DANI, ID_GENERIC, ID_IDAN, ID_RON
 
 GRADE = 'י"א'
 
@@ -23,11 +24,11 @@ def seeded():
         session.flush()
 
         s1 = Student(
-            name="דני", grade=GRADE, class_number=2, units=5, study_level=4,
+            name="דני", national_id=ID_DANI, grade=GRADE, class_number=2, units=5, study_level=4,
             subject_id=subject.id,
         )
         s2 = Student(
-            name="רותם", grade=GRADE, class_number=2, units=5, study_level=4,
+            name="רותם", national_id=ID_RON, grade=GRADE, class_number=2, units=5, study_level=4,
             subject_id=subject.id,
         )
         tutor = Tutor(name="מאיה")
@@ -44,6 +45,16 @@ def seeded():
         ids["active"], ids["subject"], [GRADE], units_min=5, units_max=5
     )
     return ids
+
+
+def test_student_person_key_uses_national_id(seeded) -> None:
+    from app.controllers.schedule_controller import ScheduleController
+    from app.database import session_scope
+
+    with session_scope() as session:
+        student = session.get(Student, seeded["s1"])
+        assert student is not None
+        assert ScheduleController._student_person_key(student) == student.national_id
 
 
 def test_basic_assignment_succeeds(seeded) -> None:
@@ -287,7 +298,7 @@ def test_auto_assign_reports_unassigned_without_qualified_tutor() -> None:
         session.add(subject)
         session.flush()
         student = Student(
-            name="עידן", grade="י'", class_number=1, units=4, study_level=3,
+            name="עידן", national_id=ID_IDAN, grade="י'", class_number=1, units=4, study_level=3,
             subject_id=subject.id,
         )
         tutor = Tutor(name="ללא הסמכה")
@@ -407,6 +418,7 @@ def test_schedulable_entities_marks_unqualified_for_tutor(seeded) -> None:
     with session_scope() as session:
         physics_student = Student(
             name="פיזיקאי",
+            national_id=ID_GENERIC,
             grade=GRADE,
             class_number=1,
             units=5,
@@ -456,6 +468,7 @@ def test_auto_assign_keeps_compact_day_for_student_in_two_subjects(seeded) -> No
         session.add(
             Student(
                 name=math_student.name,
+                national_id=math_student.national_id,
                 grade=math_student.grade,
                 class_number=math_student.class_number,
                 units=5,
@@ -466,16 +479,14 @@ def test_auto_assign_keeps_compact_day_for_student_in_two_subjects(seeded) -> No
 
     ScheduleController().auto_assign(clear_existing=True)
 
-    person_key = (
-        f"{math_student.name}|{math_student.grade}|{math_student.class_number}"
-    )
+    person_key = math_student.national_id
 
     with session_scope() as session:
         students_by_id = {s.id: s for s in session.scalars(select(Student)).all()}
         group_member_keys: dict[int, frozenset[str]] = {}
         for group in session.scalars(select(StudyGroup)).all():
             group_member_keys[group.id] = frozenset(
-                f"{m.name}|{m.grade}|{m.class_number}" for m in group.members
+                m.national_id for m in group.members
             )
 
         hours_by_day: dict[int, list[int]] = {}
@@ -484,9 +495,7 @@ def test_auto_assign_keeps_compact_day_for_student_in_two_subjects(seeded) -> No
             if slot.student_id is not None:
                 student = students_by_id.get(slot.student_id)
                 if student is not None:
-                    affected.add(
-                        f"{student.name}|{student.grade}|{student.class_number}"
-                    )
+                    affected.add(student.national_id)
             elif slot.study_group_id is not None:
                 affected |= group_member_keys.get(slot.study_group_id, frozenset())
 

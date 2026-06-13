@@ -92,6 +92,10 @@ class MainWindow(QMainWindow):
         export_action.triggered.connect(self._on_export)
         toolbar.addAction(export_action)
 
+        html_export_action = QAction("הורדת אתר HTML", self)
+        html_export_action.triggered.connect(self._on_html_export)
+        toolbar.addAction(html_export_action)
+
         toolbar.addSeparator()
 
         self.theme_action = QAction("מצב כהה", self)
@@ -123,6 +127,11 @@ class MainWindow(QMainWindow):
         from app.controllers.export_controller import ExportController
 
         ExportController(self).open_export_dialog()
+
+    def _on_html_export(self) -> None:
+        from app.controllers.export_controller import ExportController
+
+        ExportController(self).export_html_dialog()
 
     def _show_about(self) -> None:
         QMessageBox.about(

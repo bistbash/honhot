@@ -34,7 +34,7 @@ class StudentEditorDialog(QDialog):
         self.student_id = student_id
         self._in_group = False
         self.setWindowTitle("עריכת תלמיד" if student_id else "הוספת תלמיד")
-        self.resize(420, 320)
+        self.resize(420, 360)
         self._build_ui()
         if student_id is not None:
             self._load()
@@ -49,6 +49,12 @@ class StudentEditorDialog(QDialog):
         layout.addWidget(QLabel("שם:"))
         self.name_edit = QLineEdit()
         layout.addWidget(self.name_edit)
+
+        layout.addWidget(QLabel("תעודת זהות:"))
+        self.national_id_edit = QLineEdit()
+        self.national_id_edit.setPlaceholderText("9 ספרות")
+        self.national_id_edit.setMaxLength(9)
+        layout.addWidget(self.national_id_edit)
 
         layout.addWidget(QLabel("שכבה:"))
         self.grade_combo = QComboBox()
@@ -99,6 +105,7 @@ class StudentEditorDialog(QDialog):
         if student is None:
             return
         self.name_edit.setText(student["name"])
+        self.national_id_edit.setText(student["national_id"])
         idx = self.grade_combo.findData(student["grade"])
         if idx >= 0:
             self.grade_combo.setCurrentIndex(idx)
@@ -141,6 +148,9 @@ class StudentEditorDialog(QDialog):
 
     def name(self) -> str:
         return self.name_edit.text()
+
+    def national_id(self) -> str:
+        return self.national_id_edit.text()
 
     def grade(self) -> str:
         return str(self.grade_combo.currentData())

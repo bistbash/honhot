@@ -37,6 +37,7 @@ from app.controllers.subject_controller import SubjectController
 from app.controllers.tutor_controller import TutorController
 from app.database import init_db, session_scope
 from app.models import Student
+from app.services.national_id import validate_national_id
 
 # (name, grade, class_number)
 PersonRow = tuple[str, str, int]
@@ -461,6 +462,18 @@ def _roster_by_name() -> dict[str, PersonRow]:
     return {name: (name, grade, cls) for name, grade, cls in ROSTER}
 
 
+def _national_id_for_name(name: str) -> str:
+    """Derive a stable, valid national ID from a roster name."""
+    base = sum(ord(ch) for ch in name) % 100_000_000
+    for offset in range(200):
+        candidate = f"{base + offset:09d}"[-9:]
+        try:
+            return validate_national_id(candidate)
+        except ValueError:
+            continue
+    return validate_national_id("000000018")
+
+
 def _add_students(subject_id: int, enroll: dict[str, Enrollment]) -> dict[str, int]:
     """Insert students; return name -> student_id."""
     roster = _roster_by_name()
@@ -473,6 +486,7 @@ def _add_students(subject_id: int, enroll: dict[str, Enrollment]) -> dict[str, i
             _, grade, class_number = person
             student = Student(
                 name=name,
+                national_id=_national_id_for_name(name),
                 grade=grade,
                 class_number=class_number,
                 units=units,

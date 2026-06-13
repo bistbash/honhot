@@ -27,7 +27,7 @@ from app.views.student_editor_dialog import StudentEditorDialog
 class ImportView(QWidget):
     """Import .xlsx files and manage students of each subject."""
 
-    _STUDENT_HEADERS = ["שם", "שכבה", "כיתה", 'יח"ל', "רמה", "קבוצה", "חונכת מועדפת"]
+    _STUDENT_HEADERS = ["ת.ז.", "שם", "שכבה", "כיתה", 'יח"ל', "רמה", "קבוצה", "חונכת מועדפת"]
 
     def __init__(self) -> None:
         super().__init__()
@@ -162,7 +162,7 @@ class ImportView(QWidget):
             self,
             "התבנית נשמרה",
             "נשמרה תבנית לדוגמה עם העמודות הנדרשות:\n"
-            'שם תלמיד, כיתה, יח"ל, רמת לימוד.\n\n'
+            'שם תלמיד, ת.ז., כיתה, יח"ל, רמת לימוד.\n\n'
             "מלאו את השורות ושמרו, ואז ייבאו את הקובץ.",
         )
 
@@ -178,6 +178,7 @@ class ImportView(QWidget):
             self.controller.add_student(
                 subject_id,
                 dialog.name(),
+                dialog.national_id(),
                 dialog.grade(),
                 dialog.class_number(),
                 dialog.units(),
@@ -206,6 +207,7 @@ class ImportView(QWidget):
             result = self.controller.update_student(
                 student_id,
                 dialog.name(),
+                dialog.national_id(),
                 dialog.grade(),
                 dialog.class_number(),
                 dialog.units(),
@@ -272,7 +274,7 @@ class ImportView(QWidget):
         row = self.table.currentRow()
         if row < 0:
             return None
-        item = self.table.item(row, 0)
+        item = self.table.item(row, 1)
         if item is None:
             return None
         data = item.data(Qt.ItemDataRole.UserRole)
@@ -318,6 +320,7 @@ class ImportView(QWidget):
         self.table.setRowCount(len(students))
         for row, student in enumerate(students):
             values = [
+                student["national_id"],
                 student["name"],
                 student["grade"],
                 str(student["class_number"]),
@@ -329,7 +332,7 @@ class ImportView(QWidget):
             for col, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                if col == 0:
+                if col == 1:
                     item.setData(Qt.ItemDataRole.UserRole, student["id"])
                 self.table.setItem(row, col, item)
         self.summary_label.setText(f"סה\"כ {len(students)} תלמידים במקצוע זה.")

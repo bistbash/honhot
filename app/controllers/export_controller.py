@@ -1,8 +1,11 @@
-"""Controller and dialog for exporting the schedule to Excel or PDF."""
+"""Controller and dialog for exporting the schedule to Excel, PDF or HTML."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -13,10 +16,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.config import APP_NAME
+from app.config import APP_NAME, DAYS, HOURS
 from app.database import session_scope
-from app.models import EntityType, ScheduleSlot, Tutor
+from app.models import EntityType, ScheduleSlot, Student, StudyGroup, Subject, Tutor
 from app.services.exporter import TutorSchedule, export_to_excel, export_to_pdf
+from app.services.html_schedule_exporter import (
+    HtmlSchedulePayload,
+    LessonBlock,
+    ScheduleSheet,
+    build_interactive_html,
+    cell_key,
+)
 
 
 class ExportController:
@@ -51,6 +61,163 @@ class ExportController:
                 )
         return schedules
 
+    @staticmethod
+    def _student_lesson_label(student: Student) -> str:
+        return f"{student.name} · ת.ז. {student.national_id}"
+
+    @staticmethod
+    def _lesson_from_slot(slot: ScheduleSlot) -> LessonBlock:
+        if slot.entity_type == EntityType.STUDENT and slot.student:
+            students = [ExportController._student_lesson_label(slot.student)]
+        elif slot.study_group:
+            students = [
+                ExportController._student_lesson_label(member)
+                for member in slot.study_group.members
+            ]
+        else:
+            students = []
+        return LessonBlock(
+            subject=slot.subject.name,
+            tutor=slot.tutor.name,
+            students=students,
+        )
+
+    def _load_slots(self) -> list[ScheduleSlot]:
+        with session_scope() as session:
+            return list(
+                session.scalars(
+                    select(ScheduleSlot)
+                    .options(
+                        joinedload(ScheduleSlot.tutor),
+                        joinedload(ScheduleSlot.subject),
+                        joinedload(ScheduleSlot.student),
+                        joinedload(ScheduleSlot.study_group).joinedload(
+                            StudyGroup.members
+                        ),
+                    )
+                    .order_by(ScheduleSlot.day, ScheduleSlot.hour)
+                ).unique()
+            )
+
+    @staticmethod
+    def _build_tutor_sheets(
+        tutors: list[Tutor], slots: list[ScheduleSlot]
+    ) -> list[ScheduleSheet]:
+        slots_by_tutor: dict[int, list[ScheduleSlot]] = {}
+        for slot in slots:
+            slots_by_tutor.setdefault(slot.tutor_id, []).append(slot)
+
+        sheets: list[ScheduleSheet] = []
+        for tutor in tutors:
+            cells: dict[str, list[LessonBlock]] = {}
+            for slot in slots_by_tutor.get(tutor.id, []):
+                key = cell_key(slot.day, slot.hour)
+                cells[key] = [ExportController._lesson_from_slot(slot)]
+            sheets.append(
+                ScheduleSheet(
+                    id=tutor.id,
+                    name=tutor.name,
+                    kind="tutor",
+                    cells=cells,
+                )
+            )
+        return sheets
+
+    @staticmethod
+    def _build_subject_sheets(
+        subjects: list[Subject], slots: list[ScheduleSlot]
+    ) -> list[ScheduleSheet]:
+        slots_by_subject: dict[int, list[ScheduleSlot]] = {}
+        for slot in slots:
+            slots_by_subject.setdefault(slot.subject_id, []).append(slot)
+
+        sheets: list[ScheduleSheet] = []
+        for subject in subjects:
+            cells: dict[str, list[LessonBlock]] = {}
+            for slot in slots_by_subject.get(subject.id, []):
+                key = cell_key(slot.day, slot.hour)
+                cells.setdefault(key, []).append(
+                    ExportController._lesson_from_slot(slot)
+                )
+            sheets.append(
+                ScheduleSheet(
+                    id=subject.id,
+                    name=subject.name,
+                    kind="subject",
+                    cells=cells,
+                )
+            )
+        return sheets
+
+    @staticmethod
+    def _build_student_sheets(
+        students: list[Student], slots: list[ScheduleSlot]
+    ) -> list[ScheduleSheet]:
+        group_members: dict[int, set[int]] = {}
+        for slot in slots:
+            if slot.study_group_id is None or slot.study_group is None:
+                continue
+            member_ids = group_members.setdefault(
+                slot.study_group_id, set()
+            )
+            for member in slot.study_group.members:
+                member_ids.add(member.id)
+
+        sheets: list[ScheduleSheet] = []
+        for student in students:
+            cells: dict[str, list[LessonBlock]] = {}
+            for slot in slots:
+                assigned = (
+                    slot.entity_type == EntityType.STUDENT
+                    and slot.student_id == student.id
+                ) or (
+                    slot.study_group_id is not None
+                    and student.id in group_members.get(slot.study_group_id, set())
+                )
+                if not assigned:
+                    continue
+                key = cell_key(slot.day, slot.hour)
+                cells[key] = [ExportController._lesson_from_slot(slot)]
+            sheets.append(
+                ScheduleSheet(
+                    id=student.id,
+                    name=student.display_label,
+                    kind="student",
+                    cells=cells,
+                    national_id=student.national_id,
+                )
+            )
+        return sheets
+
+    def build_html_payload(self) -> HtmlSchedulePayload:
+        """Collect all schedule data for the interactive HTML export."""
+        slots = self._load_slots()
+        with session_scope() as session:
+            tutors = session.scalars(select(Tutor).order_by(Tutor.name)).all()
+            subjects = session.scalars(select(Subject).order_by(Subject.name)).all()
+            students = session.scalars(
+                select(Student).order_by(Student.name, Student.grade)
+            ).all()
+
+        sheets: list[ScheduleSheet] = []
+        sheets.extend(self._build_tutor_sheets(tutors, slots))
+        sheets.extend(self._build_subject_sheets(subjects, slots))
+        sheets.extend(self._build_student_sheets(students, slots))
+
+        return HtmlSchedulePayload(
+            title=APP_NAME,
+            days=list(DAYS),
+            hours=list(HOURS),
+            sheets=sheets,
+        )
+
+    def export_html_site(self, path: str | Path) -> Path:
+        """Write a self-contained interactive HTML schedule to ``path``."""
+        path = Path(path)
+        payload = self.build_html_payload()
+        path.write_text(build_interactive_html(payload), encoding="utf-8")
+        return path
+
     def list_tutors(self) -> list[tuple[int, str]]:
         with session_scope() as session:
             rows = session.scalars(select(Tutor).order_by(Tutor.name)).all()
@@ -73,6 +240,7 @@ class ExportController:
         format_combo = QComboBox()
         format_combo.addItem("Excel (.xlsx)", "xlsx")
         format_combo.addItem("PDF (.pdf)", "pdf")
+        format_combo.addItem("HTML (.html)", "html")
         form.addRow("פורמט:", format_combo)
 
         buttons = QDialogButtonBox(
@@ -86,9 +254,44 @@ class ExportController:
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
-        tutor_id = scope_combo.currentData()
         fmt = format_combo.currentData()
+        if fmt == "html":
+            self._run_html_export()
+            return
+
+        tutor_id = scope_combo.currentData()
         self._run_export(tutor_id, fmt)
+
+    def export_html_dialog(self) -> None:
+        """Prompt for a save path and export the full interactive HTML site."""
+        self._run_html_export()
+
+    def _run_html_export(self) -> None:
+        payload = self.build_html_payload()
+        if not payload.sheets:
+            QMessageBox.information(
+                self.parent, "אין נתונים", "אין נתונים לייצוא HTML."
+            )
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self.parent,
+            "שמירת אתר HTML",
+            "schedule.html",
+            "קובץ HTML (*.html)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".html"):
+            path += ".html"
+
+        try:
+            self.export_html_site(path)
+        except Exception as exc:  # noqa: BLE001 - report any export failure
+            QMessageBox.critical(self.parent, "שגיאת ייצוא", str(exc))
+            return
+
+        QMessageBox.information(self.parent, "הייצוא הושלם", f"הקובץ נשמר:\n{path}")
 
     def _run_export(self, tutor_id: int | None, fmt: str) -> None:
         schedules = self.build_schedules(tutor_id)

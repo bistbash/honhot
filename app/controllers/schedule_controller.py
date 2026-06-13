@@ -622,7 +622,7 @@ class ScheduleController:
     # --------------------------------------------------------------- helpers
     @staticmethod
     def _student_person_key(student: Student) -> str:
-        return f"{student.name}|{student.grade}|{student.class_number}"
+        return student.national_id
 
     @staticmethod
     def _group_person_key(group_id: int) -> str:

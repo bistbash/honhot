@@ -84,6 +84,16 @@ def _post_migrate(engine: Engine) -> None:
                     "ALTER TABLE students ADD COLUMN preferred_tutor_id INTEGER "
                     "REFERENCES tutors(id) ON DELETE SET NULL"
                 )
+        if "national_id" not in columns:
+            with engine.begin() as conn:
+                conn.exec_driver_sql(
+                    "ALTER TABLE students ADD COLUMN national_id VARCHAR(9) "
+                    "NOT NULL DEFAULT '000000000'"
+                )
+                conn.exec_driver_sql(
+                    "CREATE INDEX IF NOT EXISTS ix_students_national_id "
+                    "ON students (national_id)"
+                )
     if "study_groups" in tables:
         columns = {c["name"] for c in inspector.get_columns("study_groups")}
         if "preferred_tutor_id" not in columns:

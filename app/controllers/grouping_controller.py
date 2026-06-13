@@ -22,11 +22,13 @@ def _student_dict(student: Student) -> dict:
     return {
         "id": student.id,
         "name": student.name,
+        "national_id": student.national_id,
         "grade": student.grade,
         "units": student.units,
         "study_level": student.study_level,
         "label": (
             f"{student.name}  ({student.grade}{student.class_number})  ·  "
+            f"ת.ז. {student.national_id}  ·  "
             f"{student.units} יח\"ל  ·  רמה {student.study_level}"
         ),
     }
@@ -180,7 +182,9 @@ class GroupingController:
                     "grade": g.grade,
                     "units": g.units,
                     "study_level": g.study_level,
-                    "members": [m.name for m in g.members],
+                    "members": [
+                        f"{m.name} (ת.ז. {m.national_id})" for m in g.members
+                    ],
                     "preferred_tutor_id": g.preferred_tutor_id,
                     "preferred_tutor_name": (
                         g.preferred_tutor.name if g.preferred_tutor else ""

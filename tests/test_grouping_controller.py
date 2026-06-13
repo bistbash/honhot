@@ -11,6 +11,7 @@ from app.controllers.grouping_controller import (
 )
 from app.database import session_scope
 from app.models import Student, Subject
+from tests.student_ids import ID_DANA, ID_IDAN, ID_MAYA, ID_RON
 
 GRADE = 'י"א'
 
@@ -22,13 +23,13 @@ def _seed():
         session.add(subject)
         session.flush()
         students = [
-            Student(name="דנה", grade=GRADE, class_number=1, units=5,
+            Student(name="דנה", national_id=ID_DANA, grade=GRADE, class_number=1, units=5,
                     study_level=4, subject_id=subject.id),
-            Student(name="רון", grade=GRADE, class_number=1, units=5,
+            Student(name="רון", national_id=ID_RON, grade=GRADE, class_number=1, units=5,
                     study_level=3, subject_id=subject.id),
-            Student(name="מאיה", grade=GRADE, class_number=2, units=5,
+            Student(name="מאיה", national_id=ID_MAYA, grade=GRADE, class_number=2, units=5,
                     study_level=4, subject_id=subject.id),
-            Student(name="עידן", grade="י'", class_number=1, units=4,
+            Student(name="עידן", national_id=ID_IDAN, grade="י'", class_number=1, units=4,
                     study_level=3, subject_id=subject.id),
         ]
         session.add_all(students)
