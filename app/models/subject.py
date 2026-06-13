@@ -25,9 +25,8 @@ class Subject(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     # Weekly tutoring hours each student needs in this subject.
-    weekly_hours: Mapped[int] = mapped_column(
-        Integer, default=1, server_default="1", nullable=False
-    )
+    # ``None`` means no auto-scheduling quota (manual assignment only).
+    weekly_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     students: Mapped[list["Student"]] = relationship(
         back_populates="subject", cascade="all, delete-orphan"

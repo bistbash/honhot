@@ -7,12 +7,14 @@ from collections import Counter
 from sqlalchemy import select
 
 from app.database import session_scope
-from app.models import Student, StudyGroup, Subject
+from app.models import Student, StudyGroup, Subject, Tutor
 from app.services.grouping_engine import (
     GroupSuggestion,
     StudentRef,
     suggest_groups,
 )
+
+_UNSET: object = object()
 
 
 def _student_dict(student: Student) -> dict:
@@ -54,6 +56,15 @@ def _validate_uniform(students: list[Student]) -> tuple[str, int, int]:
     return next(iter(grades)), next(iter(units)), level
 
 
+def _inherit_preferred_tutor(students: list[Student]) -> int | None:
+    """If all members share the same preferred tutor, return it."""
+    prefs = {s.preferred_tutor_id for s in students}
+    prefs.discard(None)
+    if len(prefs) == 1:
+        return prefs.pop()
+    return None
+
+
 class GroupingController:
     """Suggests and creates study groups within a subject."""
 
@@ -61,6 +72,20 @@ class GroupingController:
         with session_scope() as session:
             rows = session.scalars(select(Subject).order_by(Subject.name)).all()
             return [(s.id, s.name) for s in rows]
+
+    def list_qualified_tutors(
+        self, subject_id: int, grade: str, units: int
+    ) -> list[tuple[int, str]]:
+        """Return tutors qualified for the given subject, grade and units."""
+        with session_scope() as session:
+            tutors = session.scalars(select(Tutor).order_by(Tutor.name)).all()
+            result: list[tuple[int, str]] = []
+            for tutor in tutors:
+                for qual in tutor.subjects:
+                    if qual.subject_id == subject_id and qual.covers(grade, units):
+                        result.append((tutor.id, tutor.name))
+                        break
+            return result
 
     def suggestions_for_subject(
         self, subject_id: int, max_size: int = 0
@@ -88,7 +113,11 @@ class GroupingController:
         return suggest_groups(refs, max_size=max_size)
 
     def create_group(
-        self, subject_id: int, suggestion: GroupSuggestion, name: str | None = None
+        self,
+        subject_id: int,
+        suggestion: GroupSuggestion,
+        name: str | None = None,
+        preferred_tutor_id: int | None = None,
     ) -> int:
         """Create a StudyGroup from a suggestion and attach its members.
 
@@ -108,6 +137,7 @@ class GroupingController:
                 units=suggestion.key.units,
                 study_level=suggestion.key.study_level,
                 subject_id=subject_id,
+                preferred_tutor_id=preferred_tutor_id,
             )
             session.add(group)
             session.flush()
@@ -139,6 +169,10 @@ class GroupingController:
                     "units": g.units,
                     "study_level": g.study_level,
                     "members": [m.name for m in g.members],
+                    "preferred_tutor_id": g.preferred_tutor_id,
+                    "preferred_tutor_name": (
+                        g.preferred_tutor.name if g.preferred_tutor else ""
+                    ),
                 }
                 for g in groups
             ]
@@ -187,10 +221,15 @@ class GroupingController:
                 "grade": group.grade,
                 "units": group.units,
                 "study_level": group.study_level,
+                "preferred_tutor_id": group.preferred_tutor_id,
             }
 
     def create_manual_group(
-        self, subject_id: int, name: str, student_ids: list[int]
+        self,
+        subject_id: int,
+        name: str,
+        student_ids: list[int],
+        preferred_tutor_id: int | None = None,
     ) -> int:
         """Create a group from a hand-picked set of students.
 
@@ -215,6 +254,9 @@ class GroupingController:
                     "תלמידים שכבר משובצים בקבוצה: " + ", ".join(blocked)
                 )
 
+            if preferred_tutor_id is None:
+                preferred_tutor_id = _inherit_preferred_tutor(students)
+
             group_name = (name or "").strip() or (
                 f"{subject.name} - {grade} - {units} יח\"ל"
             )
@@ -224,6 +266,7 @@ class GroupingController:
                 units=units,
                 study_level=level,
                 subject_id=subject_id,
+                preferred_tutor_id=preferred_tutor_id,
             )
             session.add(group)
             session.flush()
@@ -232,7 +275,11 @@ class GroupingController:
             return group.id
 
     def set_group_members(
-        self, group_id: int, name: str, student_ids: list[int]
+        self,
+        group_id: int,
+        name: str,
+        student_ids: list[int],
+        preferred_tutor_id: int | None | object = _UNSET,
     ) -> None:
         """Replace a group's members and name (for manual editing)."""
         with session_scope() as session:
@@ -269,3 +316,19 @@ class GroupingController:
             group.grade = grade
             group.units = units
             group.study_level = level
+            if preferred_tutor_id is not _UNSET:
+                group.preferred_tutor_id = preferred_tutor_id  # type: ignore[assignment]
+
+    def set_group_details(
+        self,
+        group_id: int,
+        name: str,
+        preferred_tutor_id: int | None = None,
+    ) -> None:
+        """Update a group's name and preferred tutor without changing members."""
+        with session_scope() as session:
+            group = session.get(StudyGroup, group_id)
+            if group is None:
+                raise ValueError("הקבוצה לא נמצאה")
+            group.name = (name or "").strip() or group.name
+            group.preferred_tutor_id = preferred_tutor_id

@@ -8,13 +8,22 @@ from app.database import session_scope
 from app.models import Subject, SubjectTimeWindow
 
 
+def format_subject_label(name: str, weekly_hours: int | None) -> str:
+    """Format a subject name for dropdown labels."""
+    if weekly_hours is None:
+        return name
+    return f'{name}  ({weekly_hours} ש"ש)'
+
+
 class SubjectController:
     """Manages subjects, their weekly hours and reserved (day, hour) windows."""
 
     def list_subjects(self) -> list[tuple[int, str]]:
         with session_scope() as session:
             rows = session.scalars(select(Subject).order_by(Subject.name)).all()
-            return [(s.id, s.name) for s in rows]
+            return [
+                (s.id, format_subject_label(s.name, s.weekly_hours)) for s in rows
+            ]
 
     def list_subjects_detailed(self) -> list[dict]:
         """Return subjects with their weekly hours for management views."""
@@ -25,18 +34,16 @@ class SubjectController:
                 for s in rows
             ]
 
-    def add_subject(self, name: str, weekly_hours: int = 1) -> int:
+    def add_subject(self, name: str) -> int:
         """Create a subject manually (without importing students)."""
         name = name.strip()
         if not name:
             raise ValueError("יש להזין שם מקצוע")
-        if weekly_hours < 1:
-            raise ValueError("שעות שבועיות חייבות להיות 1 ומעלה")
         with session_scope() as session:
             existing = session.scalar(select(Subject).where(Subject.name == name))
             if existing is not None:
                 raise ValueError("מקצוע בשם זה כבר קיים")
-            subject = Subject(name=name, weekly_hours=weekly_hours)
+            subject = Subject(name=name)
             session.add(subject)
             session.flush()
             return subject.id
@@ -57,13 +64,13 @@ class SubjectController:
             if subject is not None:
                 subject.name = new_name
 
-    def get_weekly_hours(self, subject_id: int) -> int:
+    def get_weekly_hours(self, subject_id: int) -> int | None:
         with session_scope() as session:
             subject = session.get(Subject, subject_id)
-            return subject.weekly_hours if subject else 1
+            return subject.weekly_hours if subject else None
 
-    def set_weekly_hours(self, subject_id: int, weekly_hours: int) -> None:
-        if weekly_hours < 1:
+    def set_weekly_hours(self, subject_id: int, weekly_hours: int | None) -> None:
+        if weekly_hours is not None and weekly_hours < 1:
             raise ValueError("שעות שבועיות חייבות להיות 1 ומעלה")
         with session_scope() as session:
             subject = session.get(Subject, subject_id)

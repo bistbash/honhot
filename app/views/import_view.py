@@ -1,4 +1,4 @@
-"""View for importing subject workbooks and browsing imported students."""
+"""View for importing subject workbooks and managing students."""
 
 from __future__ import annotations
 
@@ -21,12 +21,13 @@ from PySide6.QtWidgets import (
 
 from app.controllers.import_controller import ImportController
 from app.services.excel_parser import ExcelImportError, ImportResult
+from app.views.student_editor_dialog import StudentEditorDialog
 
 
 class ImportView(QWidget):
-    """Import .xlsx files and review the students of each subject."""
+    """Import .xlsx files and manage students of each subject."""
 
-    _STUDENT_HEADERS = ["שם", "שכבה", "כיתה", 'יח"ל', "רמה", "קבוצה"]
+    _STUDENT_HEADERS = ["שם", "שכבה", "כיתה", 'יח"ל', "רמה", "קבוצה", "חונכת מועדפת"]
 
     def __init__(self) -> None:
         super().__init__()
@@ -40,7 +41,6 @@ class ImportView(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
-        # Top action bar.
         actions = QHBoxLayout()
         import_btn = QPushButton("ייבוא קובץ אקסל")
         import_btn.clicked.connect(self._on_import)
@@ -51,6 +51,20 @@ class ImportView(QWidget):
         template_btn.clicked.connect(self._on_download_template)
         actions.addWidget(template_btn)
 
+        add_btn = QPushButton("הוספת תלמיד")
+        add_btn.clicked.connect(self._on_add_student)
+        actions.addWidget(add_btn)
+
+        edit_btn = QPushButton("עריכת תלמיד")
+        edit_btn.setProperty("class", "secondary")
+        edit_btn.clicked.connect(self._on_edit_student)
+        actions.addWidget(edit_btn)
+
+        delete_btn = QPushButton("מחיקת תלמיד")
+        delete_btn.setProperty("class", "secondary")
+        delete_btn.clicked.connect(self._on_delete_student)
+        actions.addWidget(delete_btn)
+
         actions.addStretch(1)
         actions.addWidget(QLabel("מקצוע:"))
         self.subject_combo = QComboBox()
@@ -58,14 +72,13 @@ class ImportView(QWidget):
         self.subject_combo.currentIndexChanged.connect(self._reload_students)
         actions.addWidget(self.subject_combo)
 
-        delete_btn = QPushButton("מחיקת מקצוע")
-        delete_btn.setProperty("class", "secondary")
-        delete_btn.clicked.connect(self._on_delete_subject)
-        actions.addWidget(delete_btn)
+        delete_subject_btn = QPushButton("מחיקת מקצוע")
+        delete_subject_btn.setProperty("class", "secondary")
+        delete_subject_btn.clicked.connect(self._on_delete_subject)
+        actions.addWidget(delete_subject_btn)
 
         layout.addLayout(actions)
 
-        # Students table.
         self.table = QTableWidget(0, len(self._STUDENT_HEADERS))
         self.table.setHorizontalHeaderLabels(self._STUDENT_HEADERS)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -76,6 +89,7 @@ class ImportView(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch
         )
+        self.table.cellDoubleClicked.connect(self._on_edit_student)
         layout.addWidget(self.table, 1)
 
         self.summary_label = QLabel("")
@@ -139,7 +153,7 @@ class ImportView(QWidget):
             file_path += ".xlsx"
         try:
             self.controller.create_template(file_path)
-        except Exception as exc:  # noqa: BLE001 - surface any write/openpyxl error
+        except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(
                 self, "שגיאה", f"לא ניתן ליצור את התבנית:\n{exc}"
             )
@@ -151,6 +165,85 @@ class ImportView(QWidget):
             'שם תלמיד, כיתה, יח"ל, רמת לימוד.\n\n'
             "מלאו את השורות ושמרו, ואז ייבאו את הקובץ.",
         )
+
+    def _on_add_student(self) -> None:
+        subject_id = self._current_subject_id()
+        if subject_id is None:
+            QMessageBox.information(self, "אין מקצוע", "יש לבחור מקצוע תחילה.")
+            return
+        dialog = StudentEditorDialog(self.controller, subject_id, parent=self)
+        if dialog.exec() != StudentEditorDialog.DialogCode.Accepted:
+            return
+        try:
+            self.controller.add_student(
+                subject_id,
+                dialog.name(),
+                dialog.grade(),
+                dialog.class_number(),
+                dialog.units(),
+                dialog.study_level(),
+                preferred_tutor_id=dialog.preferred_tutor_id(),
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "שגיאה", str(exc))
+            return
+        self._reload_students()
+
+    def _on_edit_student(self, _row: int = -1, _col: int = -1) -> None:
+        student_id = self._selected_student_id()
+        if student_id is None:
+            QMessageBox.information(self, "אין בחירה", "יש לבחור תלמיד לעריכה.")
+            return
+        subject_id = self._current_subject_id()
+        if subject_id is None:
+            return
+        dialog = StudentEditorDialog(
+            self.controller, subject_id, student_id=student_id, parent=self
+        )
+        if dialog.exec() != StudentEditorDialog.DialogCode.Accepted:
+            return
+        try:
+            result = self.controller.update_student(
+                student_id,
+                dialog.name(),
+                dialog.grade(),
+                dialog.class_number(),
+                dialog.units(),
+                dialog.study_level(),
+                preferred_tutor_id=dialog.preferred_tutor_id(),
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "שגיאה", str(exc))
+            return
+        if result.removed_from_group:
+            QMessageBox.information(
+                self,
+                "הוצאה מקבוצה",
+                "התלמיד הוצא מהקבוצה בעקבות שינוי שכבה, יח\"ל או רמת לימוד.",
+            )
+        self._reload_students()
+
+    def _on_delete_student(self) -> None:
+        student_id = self._selected_student_id()
+        if student_id is None:
+            QMessageBox.information(self, "אין בחירה", "יש לבחור תלמיד למחיקה.")
+            return
+        student = self.controller.get_student(student_id)
+        name = student["name"] if student else ""
+        confirm = QMessageBox.question(
+            self,
+            "מחיקת תלמיד",
+            f"למחוק את '{name}'? השיבוצים שלו יימחקו.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.controller.delete_student(student_id)
+        except ValueError as exc:
+            QMessageBox.warning(self, "שגיאה", str(exc))
+            return
+        self._reload_students()
 
     def _on_delete_subject(self) -> None:
         subject_id = self._current_subject_id()
@@ -174,6 +267,16 @@ class ImportView(QWidget):
         from pathlib import Path
 
         return Path(file_path).stem
+
+    def _selected_student_id(self) -> int | None:
+        row = self.table.currentRow()
+        if row < 0:
+            return None
+        item = self.table.item(row, 0)
+        if item is None:
+            return None
+        data = item.data(Qt.ItemDataRole.UserRole)
+        return int(data) if data is not None else None
 
     def _show_issues(
         self, result: ImportResult, committed: int, subject_name: str
@@ -221,10 +324,13 @@ class ImportView(QWidget):
                 str(student["units"]),
                 str(student["study_level"]),
                 student["group"],
+                student["preferred_tutor_name"] or "(ללא)",
             ]
             for col, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                if col == 0:
+                    item.setData(Qt.ItemDataRole.UserRole, student["id"])
                 self.table.setItem(row, col, item)
         self.summary_label.setText(f"סה\"כ {len(students)} תלמידים במקצוע זה.")
 

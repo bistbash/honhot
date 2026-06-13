@@ -37,7 +37,11 @@ class EntityInfo:
     subject_id: int
     subject_name: str
     scheduled_count: int
-    required_hours: int
+    required_hours: int | None
+    preferred_tutor_name: str = ""
+    grade: str = ""
+    units: int = 0
+    assignable: bool = True
 
 
 @dataclass
@@ -79,8 +83,12 @@ class ScheduleController:
             rows = session.scalars(select(Tutor).order_by(Tutor.name)).all()
             return [(t.id, t.name) for t in rows]
 
-    def schedulable_entities(self) -> list[EntityInfo]:
-        """Return lone students (not in a group) and all study groups."""
+    def schedulable_entities(self, tutor_id: int | None = None) -> list[EntityInfo]:
+        """Return lone students (not in a group) and all study groups.
+
+        When ``tutor_id`` is given, each entity's ``assignable`` flag reflects
+        whether that tutor is qualified to teach it.
+        """
         entities: list[EntityInfo] = []
         with session_scope() as session:
             slot_counts = self._entity_slot_counts(session)
@@ -89,6 +97,15 @@ class ScheduleController:
                 select(Student).where(Student.study_group_id.is_(None))
             ).all()
             for student in lone_students:
+                assignable = True
+                if tutor_id is not None:
+                    assignable = self._tutor_qualifies(
+                        session,
+                        tutor_id,
+                        student.subject_id,
+                        student.grade,
+                        student.units,
+                    )
                 entities.append(
                     EntityInfo(
                         entity_type=EntityType.STUDENT.value,
@@ -100,11 +117,28 @@ class ScheduleController:
                             (EntityType.STUDENT.value, student.id), 0
                         ),
                         required_hours=student.subject.weekly_hours,
+                        preferred_tutor_name=(
+                            student.preferred_tutor.name
+                            if student.preferred_tutor
+                            else ""
+                        ),
+                        grade=student.grade,
+                        units=student.units,
+                        assignable=assignable,
                     )
                 )
 
             groups = session.scalars(select(StudyGroup)).all()
             for group in groups:
+                assignable = True
+                if tutor_id is not None:
+                    assignable = self._tutor_qualifies(
+                        session,
+                        tutor_id,
+                        group.subject_id,
+                        group.grade,
+                        group.units,
+                    )
                 entities.append(
                     EntityInfo(
                         entity_type=EntityType.GROUP.value,
@@ -116,6 +150,14 @@ class ScheduleController:
                             (EntityType.GROUP.value, group.id), 0
                         ),
                         required_hours=group.subject.weekly_hours,
+                        preferred_tutor_name=(
+                            group.preferred_tutor.name
+                            if group.preferred_tutor
+                            else ""
+                        ),
+                        grade=group.grade,
+                        units=group.units,
+                        assignable=assignable,
                     )
                 )
 
@@ -367,7 +409,9 @@ class ScheduleController:
     def auto_assign(self, clear_existing: bool) -> AutoAssignSummary:
         """Automatically assign entities to tutors with balanced workloads.
 
-        Each entity needs ``subject.weekly_hours`` tutoring hours per week.
+        Each entity whose subject has ``weekly_hours`` set needs that many
+        tutoring hours per week. Subjects without weekly hours are skipped
+        (manual assignment only).
 
         Args:
             clear_existing: when ``True`` the current schedule is wiped and a
@@ -396,9 +440,15 @@ class ScheduleController:
                     (window.day, window.hour)
                 )
 
-            # Existing occupancy (query, not stale relationships).
+            # Existing occupancy and cross-subject person state.
             occupied_by_tutor: dict[int, set[tuple[int, int]]] = {}
             scheduled_counts: dict[tuple[str, int], int] = {}
+            person_occupied: dict[str, set[tuple[int, int]]] = {}
+            person_tutor: dict[str, int] = {}
+            entity_tutor_counts: dict[tuple[str, int], dict[int, int]] = {}
+            students_by_id = {
+                s.id: s for s in session.scalars(select(Student)).all()
+            }
             for slot in session.scalars(select(ScheduleSlot)).all():
                 occupied_by_tutor.setdefault(slot.tutor_id, set()).add(
                     (slot.day, slot.hour)
@@ -406,6 +456,17 @@ class ScheduleController:
                 scheduled_counts[slot.entity_key] = (
                     scheduled_counts.get(slot.entity_key, 0) + 1
                 )
+                entity_tutor_counts.setdefault(slot.entity_key, {})[
+                    slot.tutor_id
+                ] = entity_tutor_counts.get(slot.entity_key, {}).get(
+                    slot.tutor_id, 0
+                ) + 1
+                person_key = self._slot_person_key(slot, students_by_id)
+                if person_key is not None:
+                    person_occupied.setdefault(person_key, set()).add(
+                        (slot.day, slot.hour)
+                    )
+                    person_tutor[person_key] = slot.tutor_id
 
             # Build tutor states for qualified tutors. Qualifications expand a
             # (subject, grade, units range) row into discrete (subject, grade,
@@ -434,15 +495,33 @@ class ScheduleController:
             # Build entities still needing hours (required minus already done).
             entities: list[EntityCandidate] = []
 
-            def _remaining(key: tuple[str, int], weekly: int) -> int:
+            def _remaining(key: tuple[str, int], weekly: int | None) -> int:
+                if weekly is None:
+                    return 0
                 return max(0, weekly - scheduled_counts.get(key, 0))
+
+            def _preferred_tutor(entity_key: tuple[str, int]) -> int | None:
+                counts = entity_tutor_counts.get(entity_key)
+                if not counts:
+                    return None
+                return max(counts, key=lambda tid: (counts[tid], -tid))
+
+            def _resolve_preferred(
+                explicit: int | None, entity_key: tuple[str, int]
+            ) -> int | None:
+                if explicit is not None:
+                    return explicit
+                return _preferred_tutor(entity_key)
 
             lone_students = session.scalars(
                 select(Student).where(Student.study_group_id.is_(None))
             ).all()
             for student in lone_students:
+                weekly = student.subject.weekly_hours
+                if weekly is None:
+                    continue
                 key = (EntityType.STUDENT.value, student.id)
-                remaining = _remaining(key, student.subject.weekly_hours)
+                remaining = _remaining(key, weekly)
                 if remaining <= 0:
                     continue
                 entities.append(
@@ -453,12 +532,19 @@ class ScheduleController:
                         grade=student.grade,
                         units=student.units,
                         label=student.display_label,
+                        person_key=self._student_person_key(student),
                         required_hours=remaining,
+                        preferred_tutor_id=_resolve_preferred(
+                            student.preferred_tutor_id, key
+                        ),
                     )
                 )
             for group in session.scalars(select(StudyGroup)).all():
+                weekly = group.subject.weekly_hours
+                if weekly is None:
+                    continue
                 key = (EntityType.GROUP.value, group.id)
-                remaining = _remaining(key, group.subject.weekly_hours)
+                remaining = _remaining(key, weekly)
                 if remaining <= 0:
                     continue
                 entities.append(
@@ -469,11 +555,21 @@ class ScheduleController:
                         grade=group.grade,
                         units=group.units,
                         label=group.name,
+                        person_key=self._group_person_key(group.id),
                         required_hours=remaining,
+                        preferred_tutor_id=_resolve_preferred(
+                            group.preferred_tutor_id, key
+                        ),
                     )
                 )
 
-            plan = plan_assignments(entities, tutor_states, subject_windows)
+            plan = plan_assignments(
+                entities,
+                tutor_states,
+                subject_windows,
+                person_occupied=person_occupied,
+                person_tutor=person_tutor,
+            )
 
             for assignment in plan.assignments:
                 session.add(
@@ -508,6 +604,26 @@ class ScheduleController:
 
     # --------------------------------------------------------------- helpers
     @staticmethod
+    def _student_person_key(student: Student) -> str:
+        return f"{student.name}|{student.grade}|{student.class_number}"
+
+    @staticmethod
+    def _group_person_key(group_id: int) -> str:
+        return f"group:{group_id}"
+
+    @staticmethod
+    def _slot_person_key(
+        slot: ScheduleSlot, students_by_id: dict[int, Student]
+    ) -> str | None:
+        if slot.student_id is not None:
+            student = students_by_id.get(slot.student_id)
+            if student is not None:
+                return ScheduleController._student_person_key(student)
+        if slot.study_group_id is not None:
+            return ScheduleController._group_person_key(slot.study_group_id)
+        return None
+
+    @staticmethod
     def _entity_subject_id(session, entity_type: str, entity_id: int) -> int | None:
         if entity_type == EntityType.STUDENT.value:
             student = session.get(Student, entity_id)
@@ -538,6 +654,18 @@ class ScheduleController:
         if slot.study_group:
             return f"{slot.study_group.name}\n{slot.subject.name}"
         return slot.subject.name
+
+    @staticmethod
+    def _tutor_qualifies(
+        session, tutor_id: int, subject_id: int, grade: str, units: int
+    ) -> bool:
+        qual_rows = session.scalars(
+            select(TutorSubject).where(
+                TutorSubject.tutor_id == tutor_id,
+                TutorSubject.subject_id == subject_id,
+            )
+        ).all()
+        return any(q.covers(grade, units) for q in qual_rows)
 
     @staticmethod
     def _entity_slot_counts(session) -> dict[tuple[str, int], int]:

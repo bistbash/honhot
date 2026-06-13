@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QMimeData, Qt, Signal
-from PySide6.QtGui import QDrag
+from PySide6.QtGui import QBrush, QColor, QDrag
 from PySide6.QtWidgets import QListWidget, QListWidgetItem
 
 from app.config import ENTITY_MIME_TYPE
@@ -11,6 +11,9 @@ from app.controllers.schedule_controller import EntityInfo
 
 _ROLE_TYPE = Qt.ItemDataRole.UserRole
 _ROLE_ID = Qt.ItemDataRole.UserRole + 1
+_ROLE_ASSIGNABLE = Qt.ItemDataRole.UserRole + 2
+
+_UNQUALIFIED_COLOR = QColor("#d64545")
 
 
 class EntitySidebar(QListWidget):
@@ -30,13 +33,32 @@ class EntitySidebar(QListWidget):
     def set_entities(self, entities: list[EntityInfo]) -> None:
         self.clear()
         for entity in entities:
-            progress = f"שובץ {entity.scheduled_count}/{entity.required_hours}"
+            if entity.required_hours is None:
+                progress = f"שובץ {entity.scheduled_count} (ידני)"
+            else:
+                progress = f"שובץ {entity.scheduled_count}/{entity.required_hours}"
             text = f"{entity.label}\n[{entity.subject_name}] · {progress}"
+            if entity.preferred_tutor_name:
+                text += f"\n(חונכת מועדפת: {entity.preferred_tutor_name})"
             item = QListWidgetItem(text)
             item.setData(_ROLE_TYPE, entity.entity_type)
             item.setData(_ROLE_ID, entity.entity_id)
-            # Visually de-emphasise entities whose weekly hours are fully met.
-            if entity.scheduled_count >= entity.required_hours:
+            item.setData(_ROLE_ASSIGNABLE, entity.assignable)
+
+            fully_scheduled = (
+                entity.required_hours is not None
+                and entity.scheduled_count >= entity.required_hours
+            )
+
+            if not entity.assignable:
+                item.setForeground(QBrush(_UNQUALIFIED_COLOR))
+                item.setToolTip(
+                    f"החונכת הנבחרת אינה מוסמכת ל{entity.subject_name}"
+                )
+                flags = item.flags()
+                flags &= ~Qt.ItemFlag.ItemIsDragEnabled
+                item.setFlags(flags)
+            elif fully_scheduled:
                 item.setForeground(Qt.GlobalColor.gray)
             self.addItem(item)
 
@@ -53,6 +75,9 @@ class EntitySidebar(QListWidget):
         item = self.currentItem()
         if item is None:
             return
+        if item.data(_ROLE_ASSIGNABLE) is False:
+            return
+
         entity_type = str(item.data(_ROLE_TYPE))
         entity_id = int(item.data(_ROLE_ID))
 

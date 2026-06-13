@@ -18,8 +18,9 @@ from app.models import (
 def _summarize_quals(quals: list[TutorSubject]) -> str:
     """Build a compact one-line summary of a tutor's qualifications."""
     parts: list[str] = []
+    valid = [q for q in quals if q.subject is not None]
     for q in sorted(
-        quals, key=lambda r: (r.subject.name, r.grade, r.units_min)
+        valid, key=lambda r: (r.subject.name, r.grade, r.units_min)  # type: ignore[union-attr]
     ):
         rng = (
             f"{q.units_min}"
@@ -69,6 +70,7 @@ class TutorController:
                     "units_max": row.units_max,
                 }
                 for row in rows
+                if row.subject is not None
             ]
 
     def add_tutor_subject(

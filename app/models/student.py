@@ -17,6 +17,7 @@ from app.models.base import Base
 if TYPE_CHECKING:
     from app.models.study_group import StudyGroup
     from app.models.subject import Subject
+    from app.models.tutor import Tutor
 
 
 class Student(Base):
@@ -37,9 +38,15 @@ class Student(Base):
     study_group_id: Mapped[int | None] = mapped_column(
         ForeignKey("study_groups.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    preferred_tutor_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tutors.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     subject: Mapped["Subject"] = relationship(back_populates="students")
     study_group: Mapped["StudyGroup | None"] = relationship(back_populates="members")
+    preferred_tutor: Mapped["Tutor | None"] = relationship(
+        foreign_keys=[preferred_tutor_id]
+    )
 
     @property
     def display_label(self) -> str:

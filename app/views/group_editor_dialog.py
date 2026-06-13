@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QLabel,
@@ -15,6 +16,9 @@ from PySide6.QtWidgets import (
 )
 
 from app.controllers.grouping_controller import GroupingController
+from app.database import session_scope
+from app.models import Student
+from sqlalchemy import select
 
 
 class GroupEditorDialog(QDialog):
@@ -36,10 +40,13 @@ class GroupEditorDialog(QDialog):
         self.controller = controller
         self.subject_id = subject_id
         self.group_id = group_id
+        self._group_grade: str | None = None
+        self._group_units: int | None = None
+        self._saved_preferred_tutor_id: int | None = None
         self.setWindowTitle(
             "עריכת קבוצת לימוד" if group_id else "יצירת קבוצת לימוד ידנית"
         )
-        self.resize(520, 560)
+        self.resize(520, 600)
         self._build_ui()
         self._load()
 
@@ -48,10 +55,18 @@ class GroupEditorDialog(QDialog):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
 
-        layout.addWidget(QLabel("שם הקבוצה (לא חובה):"))
+        layout.addWidget(QLabel("שם הקבוצה:"))
         self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("יושלם אוטומטית אם יישאר ריק")
+        self.name_edit.setPlaceholderText('לדוגמה: קבוצת חיזוק א\'')
         layout.addWidget(self.name_edit)
+
+        layout.addWidget(QLabel("חונכת מועדפת (לא חובה):"))
+        self.tutor_combo = QComboBox()
+        self.tutor_combo.setToolTip(
+            "השיבוץ האוטומטי ינסה לשבץ את החונכת הזו, "
+            "אך יבחר חונכת אחרת אם לא ניתן."
+        )
+        layout.addWidget(self.tutor_combo)
 
         layout.addWidget(
             QLabel(
@@ -91,6 +106,9 @@ class GroupEditorDialog(QDialog):
             group = self.controller.get_group(self.group_id)
             if group:
                 self.name_edit.setText(group["name"])
+                self._group_grade = group["grade"]
+                self._group_units = group["units"]
+                self._saved_preferred_tutor_id = group.get("preferred_tutor_id")
             for member in self.controller.group_members(self.group_id):
                 self._add_item(member, checked=True)
                 seen.add(member["id"])
@@ -101,6 +119,46 @@ class GroupEditorDialog(QDialog):
 
     def _update_count(self) -> None:
         self.count_label.setText(f"נבחרו {len(self.selected_member_ids())} תלמידים")
+        self._refresh_tutor_combo()
+
+    def _refresh_tutor_combo(self) -> None:
+        grade, units = self._resolve_grade_units()
+        preferred = self.preferred_tutor_id()
+        if preferred is None:
+            preferred = self._saved_preferred_tutor_id
+
+        self.tutor_combo.blockSignals(True)
+        self.tutor_combo.clear()
+        self.tutor_combo.addItem("(ללא העדפה)", None)
+
+        if grade is not None and units is not None:
+            for tutor_id, tutor_name in self.controller.list_qualified_tutors(
+                self.subject_id, grade, units
+            ):
+                self.tutor_combo.addItem(tutor_name, tutor_id)
+
+        if preferred is not None:
+            idx = self.tutor_combo.findData(preferred)
+            if idx >= 0:
+                self.tutor_combo.setCurrentIndex(idx)
+        self.tutor_combo.blockSignals(False)
+
+    def _resolve_grade_units(self) -> tuple[str | None, int | None]:
+        member_ids = self.selected_member_ids()
+        if not member_ids:
+            if self._group_grade is not None and self._group_units is not None:
+                return self._group_grade, self._group_units
+            return None, None
+
+        with session_scope() as session:
+            students = session.scalars(
+                select(Student).where(Student.id.in_(member_ids))
+            ).all()
+        grades = {s.grade for s in students}
+        units_set = {s.units for s in students}
+        if len(grades) == 1 and len(units_set) == 1:
+            return grades.pop(), units_set.pop()
+        return None, None
 
     # --------------------------------------------------------------- results
     def selected_member_ids(self) -> list[int]:
@@ -113,3 +171,7 @@ class GroupEditorDialog(QDialog):
 
     def group_name(self) -> str:
         return self.name_edit.text()
+
+    def preferred_tutor_id(self) -> int | None:
+        value = self.tutor_combo.currentData()
+        return int(value) if value is not None else None

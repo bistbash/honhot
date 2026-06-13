@@ -39,7 +39,7 @@ class TimetableView(QWidget):
         top.addWidget(QLabel("חונכת:"))
         self.tutor_combo = QComboBox()
         self.tutor_combo.setMinimumWidth(220)
-        self.tutor_combo.currentIndexChanged.connect(self._reload_grid)
+        self.tutor_combo.currentIndexChanged.connect(self._on_tutor_changed)
         top.addWidget(self.tutor_combo)
         self.load_label = QLabel("")
         self.load_label.setStyleSheet("color: #6b7895; font-weight: 600;")
@@ -65,7 +65,10 @@ class TimetableView(QWidget):
         sidebar_box = QGroupBox("תלמידים וקבוצות לשיבוץ")
         sidebar_layout = QVBoxLayout(sidebar_box)
         sidebar_layout.addWidget(
-            QLabel("גררו פריט אל המשבצת הרצויה. ירוק = מותר לשבץ.")
+            QLabel(
+                "גררו פריט אל המשבצת הרצויה. "
+                "אדום = החונכת לא מוסמכת · ירוק = חלון שמור · אפור = שובץ במלואו."
+            )
         )
         self.sidebar = EntitySidebar()
         self.sidebar.entitySelected.connect(self._on_entity_selected)
@@ -87,6 +90,10 @@ class TimetableView(QWidget):
     def _current_tutor_id(self) -> int | None:
         data = self.tutor_combo.currentData()
         return int(data) if data is not None else None
+
+    def _on_tutor_changed(self) -> None:
+        self._reload_grid()
+        self._reload_sidebar()
 
     # --------------------------------------------------------------- actions
     def _on_entity_selected(self, entity_type: str, entity_id: int) -> None:
@@ -215,7 +222,9 @@ class TimetableView(QWidget):
         self.load_label.setText(f"·  {len(slots)} שעות שבועיות משובצות")
 
     def _reload_sidebar(self) -> None:
-        self.sidebar.set_entities(self.controller.schedulable_entities())
+        self.sidebar.set_entities(
+            self.controller.schedulable_entities(self._current_tutor_id())
+        )
 
     def refresh(self) -> None:
         """Reload tutors, grid and sidebar from the database."""

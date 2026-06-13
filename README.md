@@ -48,10 +48,37 @@ The SQLite database is stored per-user at
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate.fish  # fish on Linux
 pip install -r requirements.txt
 python main.py
 ```
+
+On Linux (fish), use the venv Python directly:
+
+```fish
+cd /path/to/honot
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python main.py
+```
+
+## Local demo data (not committed to Git)
+
+Load fictional sample data into your **local** SQLite database only. The script
+itself is in the repo; the generated data stays on your machine
+(`~/AppData/Local/TutoringScheduler/schedule.db`).
+
+```fish
+.venv/bin/python scripts/seed_local_demo.py --reset --yes
+.venv/bin/python main.py
+```
+
+- `--reset` — wipe the local database before seeding (default)
+- `--yes` / `-y` — skip the confirmation prompt
+- `--no-reset` — append demo data to an existing database (may create duplicates)
+
+The `local/` directory is gitignored for any personal backups or exports.
 
 ## Tests
 

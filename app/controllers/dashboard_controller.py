@@ -138,6 +138,8 @@ class DashboardController:
             ).all()
             for student in lone:
                 required = student.subject.weekly_hours
+                if required is None:
+                    continue
                 ov.required_hours += required
                 scheduled = entity_slot_counts.get(
                     (EntityType.STUDENT.value, student.id), 0
@@ -154,6 +156,8 @@ class DashboardController:
 
             for group in session.scalars(select(StudyGroup)).all():
                 required = group.subject.weekly_hours
+                if required is None:
+                    continue
                 ov.required_hours += required
                 scheduled = entity_slot_counts.get(
                     (EntityType.GROUP.value, group.id), 0

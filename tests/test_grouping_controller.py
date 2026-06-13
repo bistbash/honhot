@@ -67,3 +67,63 @@ def test_create_manual_group_requires_members() -> None:
     subject_id, _ids = _seed()
     with pytest.raises(ValueError):
         GroupingController().create_manual_group(subject_id, "ריק", [])
+
+
+def test_group_preferred_tutor_persisted() -> None:
+    subject_id, ids = _seed()
+    ctrl = GroupingController()
+    with session_scope() as session:
+        from app.models import Tutor
+
+        tutor = Tutor(name="רות")
+        session.add(tutor)
+        session.flush()
+        tutor_id = tutor.id
+
+    group_id = ctrl.create_manual_group(
+        subject_id, "קבוצה א", ids[:2], preferred_tutor_id=tutor_id
+    )
+    group = ctrl.get_group(group_id)
+    assert group is not None
+    assert group["name"] == "קבוצה א"
+    assert group["preferred_tutor_id"] == tutor_id
+
+
+def test_inherit_preferred_tutor_from_members() -> None:
+    subject_id, ids = _seed()
+    with session_scope() as session:
+        from app.models import Tutor
+
+        tutor = Tutor(name="נועה")
+        session.add(tutor)
+        session.flush()
+        tutor_id = tutor.id
+        for sid in ids[:2]:
+            student = session.get(Student, sid)
+            assert student is not None
+            student.preferred_tutor_id = tutor_id
+
+    ctrl = GroupingController()
+    group_id = ctrl.create_manual_group(subject_id, "קבוצה ב", ids[:2])
+    group = ctrl.get_group(group_id)
+    assert group is not None
+    assert group["preferred_tutor_id"] == tutor_id
+
+
+def test_set_group_details_updates_name_and_tutor() -> None:
+    subject_id, ids = _seed()
+    ctrl = GroupingController()
+    group_id = ctrl.create_manual_group(subject_id, "שם ישן", ids[:2])
+    with session_scope() as session:
+        from app.models import Tutor
+
+        tutor = Tutor(name="דנה")
+        session.add(tutor)
+        session.flush()
+        tutor_id = tutor.id
+
+    ctrl.set_group_details(group_id, "שם חדש", preferred_tutor_id=tutor_id)
+    group = ctrl.get_group(group_id)
+    assert group is not None
+    assert group["name"] == "שם חדש"
+    assert group["preferred_tutor_id"] == tutor_id

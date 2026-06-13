@@ -296,3 +296,133 @@ def test_auto_assign_reports_unassigned_without_qualified_tutor() -> None:
     summary = ScheduleController().auto_assign(clear_existing=True)
     assert summary.assigned == 0
     assert "עידן" in " ".join(summary.unassigned_labels)
+
+
+def test_auto_assign_skips_subject_without_weekly_hours(seeded) -> None:
+    SubjectController().set_weekly_hours(seeded["subject"], None)
+    summary = ScheduleController().auto_assign(clear_existing=True)
+    assert summary.assigned == 0
+    assert not summary.unassigned_labels
+
+
+def test_auto_assign_honors_student_preferred_tutor(seeded) -> None:
+    with session_scope() as session:
+        preferred = Tutor(name="מועדפת")
+        session.add(preferred)
+        session.flush()
+        preferred_id = preferred.id
+        student = session.get(Student, seeded["s1"])
+        assert student is not None
+        student.preferred_tutor_id = preferred_id
+
+    TutorController().add_tutor_subject(
+        preferred_id, seeded["subject"], [GRADE], units_min=5, units_max=5
+    )
+
+    ScheduleController().auto_assign(clear_existing=True)
+
+    with session_scope() as session:
+        slots = session.scalars(
+            select(ScheduleSlot).where(ScheduleSlot.student_id == seeded["s1"])
+        ).all()
+        assert len(slots) == 1
+        assert slots[0].tutor_id == preferred_id
+
+
+def test_auto_assign_honors_group_preferred_tutor(seeded) -> None:
+    from app.models import StudyGroup
+
+    with session_scope() as session:
+        preferred = Tutor(name="לקבוצה")
+        session.add(preferred)
+        session.flush()
+        preferred_id = preferred.id
+
+        group = StudyGroup(
+            name="קבוצת בדיקה",
+            grade=GRADE,
+            units=5,
+            study_level=4,
+            subject_id=seeded["subject"],
+            preferred_tutor_id=preferred_id,
+        )
+        session.add(group)
+        session.flush()
+        for sid in (seeded["s1"], seeded["s2"]):
+            student = session.get(Student, sid)
+            assert student is not None
+            student.study_group_id = group.id
+        group_id = group.id
+
+    TutorController().add_tutor_subject(
+        preferred_id, seeded["subject"], [GRADE], units_min=5, units_max=5
+    )
+
+    ScheduleController().auto_assign(clear_existing=True)
+
+    with session_scope() as session:
+        slots = session.scalars(
+            select(ScheduleSlot).where(ScheduleSlot.study_group_id == group_id)
+        ).all()
+        assert len(slots) == 1
+        assert slots[0].tutor_id == preferred_id
+
+
+def test_explicit_preferred_tutor_overrides_existing_slots(seeded) -> None:
+    """DB preference wins over tutor inferred from existing assignments."""
+    with session_scope() as session:
+        other = Tutor(name="אחרת")
+        session.add(other)
+        session.flush()
+        other_id = other.id
+        student = session.get(Student, seeded["s1"])
+        assert student is not None
+        student.preferred_tutor_id = other_id
+
+    TutorController().add_tutor_subject(
+        other_id, seeded["subject"], [GRADE], units_min=5, units_max=5
+    )
+
+    ctrl = ScheduleController()
+    ctrl.try_assign(seeded["active"], 0, 0, EntityType.STUDENT.value, seeded["s1"])
+    SubjectController().set_weekly_hours(seeded["subject"], 2)
+    ctrl.auto_assign(clear_existing=False)
+
+    with session_scope() as session:
+        slots = sorted(
+            session.scalars(
+                select(ScheduleSlot).where(ScheduleSlot.student_id == seeded["s1"])
+            ).all(),
+            key=lambda s: (s.day, s.hour),
+        )
+        assert len(slots) == 2
+        assert slots[0].tutor_id == seeded["active"]
+        assert slots[1].tutor_id == other_id
+
+
+def test_schedulable_entities_marks_unqualified_for_tutor(seeded) -> None:
+    from app.controllers.subject_controller import SubjectController
+
+    physics_id = SubjectController().add_subject("פיזיקה")
+    with session_scope() as session:
+        physics_student = Student(
+            name="פיזיקאי",
+            grade=GRADE,
+            class_number=1,
+            units=5,
+            study_level=4,
+            subject_id=physics_id,
+        )
+        session.add(physics_student)
+        session.flush()
+        physics_student_id = physics_student.id
+
+    ctrl = ScheduleController()
+    entities = {e.entity_id: e for e in ctrl.schedulable_entities()}
+    math_entity = entities[seeded["s1"]]
+    assert math_entity.assignable is True
+
+    entities_for_tutor = ctrl.schedulable_entities(tutor_id=seeded["active"])
+    by_id = {e.entity_id: e for e in entities_for_tutor if e.entity_type == "student"}
+    assert by_id[seeded["s1"]].assignable is True
+    assert by_id[physics_student_id].assignable is False

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from app.controllers.grouping_controller import GroupingController
 from app.views.group_editor_dialog import GroupEditorDialog
+from app.views.group_rename_dialog import GroupRenameDialog
 from app.views.qt_models.groups_table_model import SuggestionsTableModel
 
 
@@ -109,6 +110,11 @@ class GroupingView(QWidget):
         edit_btn.clicked.connect(self._on_edit_group)
         grp_buttons.addWidget(edit_btn)
 
+        rename_btn = QPushButton("שינוי שם")
+        rename_btn.setProperty("class", "secondary")
+        rename_btn.clicked.connect(self._on_rename_group)
+        grp_buttons.addWidget(rename_btn)
+
         disband_btn = QPushButton("פירוק הקבוצה הנבחרת")
         disband_btn.setProperty("class", "secondary")
         disband_btn.clicked.connect(self._on_disband)
@@ -177,7 +183,10 @@ class GroupingView(QWidget):
             return
         try:
             self.controller.create_manual_group(
-                subject_id, dialog.group_name(), dialog.selected_member_ids()
+                subject_id,
+                dialog.group_name(),
+                dialog.selected_member_ids(),
+                preferred_tutor_id=dialog.preferred_tutor_id(),
             )
         except ValueError as exc:
             QMessageBox.warning(self, "שגיאה", str(exc))
@@ -212,7 +221,34 @@ class GroupingView(QWidget):
             return
         try:
             self.controller.set_group_members(
-                group_id, dialog.group_name(), ids
+                group_id,
+                dialog.group_name(),
+                ids,
+                preferred_tutor_id=dialog.preferred_tutor_id(),
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "שגיאה", str(exc))
+            return
+        self._reload()
+
+    def _on_rename_group(self) -> None:
+        item = self.groups_list.currentItem()
+        if item is None:
+            QMessageBox.information(self, "אין בחירה", "יש לבחור קבוצה לשינוי שם.")
+            return
+        group_id = int(item.data(256))  # Qt.UserRole
+        try:
+            dialog = GroupRenameDialog(self.controller, group_id, parent=self)
+        except ValueError as exc:
+            QMessageBox.warning(self, "שגיאה", str(exc))
+            return
+        if dialog.exec() != GroupRenameDialog.DialogCode.Accepted:
+            return
+        try:
+            self.controller.set_group_details(
+                group_id,
+                dialog.group_name(),
+                preferred_tutor_id=dialog.preferred_tutor_id(),
             )
         except ValueError as exc:
             QMessageBox.warning(self, "שגיאה", str(exc))
@@ -252,9 +288,12 @@ class GroupingView(QWidget):
         self.groups_list.clear()
         for group in self.controller.list_groups(subject_id):
             members = ", ".join(group["members"])
+            tutor_line = ""
+            if group.get("preferred_tutor_name"):
+                tutor_line = f"\n    חונכת מועדפת: {group['preferred_tutor_name']}"
             text = (
                 f"{group['name']}  -  {len(group['members'])} תלמידים"
-                f"\n    {members}"
+                f"\n    {members}{tutor_line}"
             )
             item = QListWidgetItem(text)
             item.setData(256, group["id"])  # Qt.UserRole

@@ -46,6 +46,7 @@ desktop.ini
 *.db
 *.sqlite
 *.sqlite3
+local/
 
 # Logs
 *.log
