@@ -77,6 +77,38 @@ ROSTER: list[PersonRow] = [
     ("מיכל שפירא", GRADE_YB, 3),
 ]
 
+# Fixed, checksum-valid national IDs — one per person (stable across subjects).
+NATIONAL_IDS: dict[str, str] = {
+    "דנה כהן": "100000017",
+    "יונתן לוי": "100000272",
+    "שירה בר": "100000306",
+    "איתי גולן": "100000561",
+    "נועה שמש": "100000595",
+    "עומר דהן": "100000629",
+    "רון ישראלי": "100000850",
+    "יעל מזרחי": "100000884",
+    "תומר אור": "100000918",
+    "הילה כץ": "100001122",
+    "גיא מור": "100001411",
+    "טלי נחום": "100001445",
+    "מאיה ישראלי": "100001700",
+    "יוסי דוד": "100001734",
+    "רותם שפירא": "100002278",
+    "נועם שחר": "100002567",
+    "רון לוי": "100002856",
+    "עמית סגל": "100003060",
+    "עידן שמיר": "100003094",
+    "ליאור בן שמואל": "100003128",
+    "יעל פרץ": "100003383",
+    "איתי קרמר": "100003417",
+    "נועה בר": "100003672",
+    "מיכל שפירא": "100003706",
+}
+
+assert set(NATIONAL_IDS) == {name for name, _, _ in ROSTER}
+for _name, _nid in NATIONAL_IDS.items():
+    validate_national_id(_nid)
+
 # Per-subject enrollments: name -> (units, study_level).
 # Only subjects/grades covered by at least one tutor on the flyer.
 # Bucket sizes are multiples of 2–4 so every student can be grouped.
@@ -463,15 +495,11 @@ def _roster_by_name() -> dict[str, PersonRow]:
 
 
 def _national_id_for_name(name: str) -> str:
-    """Derive a stable, valid national ID from a roster name."""
-    base = sum(ord(ch) for ch in name) % 100_000_000
-    for offset in range(200):
-        candidate = f"{base + offset:09d}"[-9:]
-        try:
-            return validate_national_id(candidate)
-        except ValueError:
-            continue
-    return validate_national_id("000000018")
+    """Return the demo national ID for a roster name."""
+    try:
+        return NATIONAL_IDS[name]
+    except KeyError as exc:
+        raise KeyError(f"חסרה ת.ז. לדוגמה עבור '{name}'") from exc
 
 
 def _add_students(subject_id: int, enroll: dict[str, Enrollment]) -> dict[str, int]:
@@ -697,6 +725,7 @@ def seed_demo_data() -> dict[str, object]:
         "tutor_loads": summary.tutor_loads,
         "db_path": database_path(),
         "roster_size": len(ROSTER),
+        "national_ids": dict(NATIONAL_IDS),
     }
 
 
@@ -737,6 +766,18 @@ def _print_summary(result: dict[str, object]) -> None:
             print(f"    ... ועוד {len(unassigned) - 8}")
     else:
         print("  שיבוץ מלא — כל הקבוצות והתלמידים שובצו")
+    national_ids: dict[str, str] = result["national_ids"]  # type: ignore[assignment]
+    print()
+    print("  ת.ז. לדוגמה (לחיפוש ב-HTML / זיהוי תלמידים עם אותו שם פרטי):")
+    samples = [
+        ("דנה כהן", "רשומה במספר מקצועות — אותה ת.ז."),
+        ("רון ישראלי", "לא לבלבל עם רון לוי"),
+        ("רון לוי", f"ת.ז. {national_ids['רון לוי']}"),
+        ("יעל מזרחי", "לא לבלבל עם יעל פרץ"),
+    ]
+    for name, note in samples:
+        print(f"    - {name}: {national_ids[name]}  ({note})")
+    print("    (רשימה מלאה ב-NATIONAL_IDS בקובץ seed_local_demo.py)")
     print()
     print("הפעל את האפליקציה:")
     print("  .venv/bin/python main.py")

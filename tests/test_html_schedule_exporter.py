@@ -118,13 +118,15 @@ def test_build_html_payload_includes_all_view_kinds() -> None:
     }
     assert tutor_names == {"מאיה", "שרה"}
 
-    student_names = {
-        sheet.name for sheet in payload.sheets if sheet.kind == "student"
-    }
+    student_sheets = [s for s in payload.sheets if s.kind == "student"]
+    assert len(student_sheets) == 3
+    assert len({s.national_id for s in student_sheets}) == 3
+
+    student_names = {sheet.name for sheet in student_sheets}
     assert any("דנה" in name for name in student_names)
     assert any("רון" in name for name in student_names)
     ron_sheet = next(
-        s for s in payload.sheets if s.kind == "student" and s.id == ids["ron"]
+        s for s in student_sheets if s.national_id == "234567899"
     )
     assert ron_sheet.national_id == "234567899"
 
@@ -133,7 +135,7 @@ def test_student_in_group_sees_group_lesson() -> None:
     ids = _seed_schedule()
     payload = ExportController().build_html_payload()
     ron_sheet = next(
-        s for s in payload.sheets if s.kind == "student" and s.id == ids["ron"]
+        s for s in payload.sheets if s.kind == "student" and s.national_id == "234567899"
     )
     key = cell_key(2, 3)
     assert key in ron_sheet.cells
@@ -170,6 +172,76 @@ def test_build_interactive_html_contains_rtl_and_embedded_data() -> None:
     assert "חונכות" in html_text
     assert "מקצועות" in html_text
     assert "תלמידים" in html_text
+
+
+def test_student_sheet_merges_same_person_across_subjects() -> None:
+    with session_scope() as session:
+        math = Subject(name="מתמטיקה")
+        english = Subject(name="אנגלית")
+        session.add_all([math, english])
+        session.flush()
+
+        tutor = Tutor(name="מאיה")
+        session.add(tutor)
+        session.flush()
+
+        shared_id = "123456782"
+        dana_math = Student(
+            name="דנה כהן",
+            national_id=shared_id,
+            grade=GRADE,
+            class_number=1,
+            units=5,
+            study_level=4,
+            subject_id=math.id,
+        )
+        dana_english = Student(
+            name="דנה כהן",
+            national_id=shared_id,
+            grade=GRADE,
+            class_number=1,
+            units=4,
+            study_level=3,
+            subject_id=english.id,
+        )
+        session.add_all([dana_math, dana_english])
+        session.flush()
+
+        session.add_all(
+            [
+                ScheduleSlot(
+                    tutor_id=tutor.id,
+                    day=1,
+                    hour=2,
+                    subject_id=math.id,
+                    entity_type=EntityType.STUDENT,
+                    student_id=dana_math.id,
+                ),
+                ScheduleSlot(
+                    tutor_id=tutor.id,
+                    day=3,
+                    hour=4,
+                    subject_id=english.id,
+                    entity_type=EntityType.STUDENT,
+                    student_id=dana_english.id,
+                ),
+            ]
+        )
+
+    payload = ExportController().build_html_payload()
+    dana_sheets = [
+        s for s in payload.sheets if s.kind == "student" and s.national_id == shared_id
+    ]
+    assert len(dana_sheets) == 1
+    sheet = dana_sheets[0]
+    assert cell_key(1, 2) in sheet.cells
+    assert cell_key(3, 4) in sheet.cells
+    subjects = {
+        block.subject
+        for blocks in sheet.cells.values()
+        for block in blocks
+    }
+    assert subjects == {"מתמטיקה", "אנגלית"}
 
 
 def test_export_html_site_writes_file(tmp_path: Path) -> None:

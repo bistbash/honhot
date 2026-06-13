@@ -16,9 +16,10 @@ Heuristic
    day is impossible without gaps, prefer a clean day over a gapped one (soft).
 4. **Tutor comfort** - spread a tutor's hours across the week and avoid long
    consecutive teaching streaks (soft limit, see ``TUTOR_PREFERRED_MAX_CONSECUTIVE``).
-5. **Balance** - when continuity is impossible, fill hour-by-hour, always
-   choosing the least-loaded qualified tutor, which greedily minimises the
-   maximum tutor load and yields a near-even spread of teaching hours.
+5. **Balance** - when no explicit preferred tutor is set, pick the least-loaded
+   qualified tutor (Phase 1 and Phase 2).  When a preferred tutor *is* set,
+   honour that choice before load.  Phase 2 (hour-by-hour) runs when no single
+   tutor can take all remaining hours.
 """
 
 from __future__ import annotations
@@ -304,6 +305,27 @@ def _tutor_sort_key(
     )
 
 
+def _tutor_pick_key(
+    tutor: TutorState,
+    preferred_tutor_id: int | None,
+    person_tutor_id: int | None,
+) -> tuple:
+    """Lexicographic key for picking a tutor (lower is better).
+
+    When an explicit preferred tutor is set, honour preferred and person
+    continuity before load.  Otherwise balance load first, with person
+    continuity as a soft tie-breaker.
+    """
+    if preferred_tutor_id is not None:
+        return _tutor_sort_key(tutor, preferred_tutor_id, person_tutor_id)
+    return (
+        tutor.load,
+        tutor.tutor_id != person_tutor_id if person_tutor_id else False,
+        tutor.name,
+        tutor.tutor_id,
+    )
+
+
 def _local_by_key(
     person_occupied: dict[str, set[tuple[int, int]]],
     person_baseline_by_key: dict[str, set[tuple[int, int]]],
@@ -348,8 +370,7 @@ def _phase2_pick(
         cell = cells[0]
         day, hour = cell
         key = (
-            *_tutor_sort_key(tutor, preferred_tutor_id, person_tutor_id)[:2],
-            tutor.load,
+            *_tutor_pick_key(tutor, preferred_tutor_id, person_tutor_id),
             *_cell_score(
                 day,
                 hour,
@@ -469,7 +490,7 @@ def plan_assignments(
         # Phase 1: continuity - preferred tutor that fits ALL the hours.
         for tutor in sorted(
             candidates,
-            key=lambda t: _tutor_sort_key(
+            key=lambda t: _tutor_pick_key(
                 t, entity.preferred_tutor_id, person_tutor_id
             ),
         ):

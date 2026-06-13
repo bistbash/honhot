@@ -76,6 +76,34 @@ def test_balances_load_across_two_tutors() -> None:
     assert tutors[1].load == 5
 
 
+def test_balances_without_preferred_tutor() -> None:
+    """Without an explicit preferred tutor, load is balanced first."""
+    entities = [
+        _entity(i, subject_id=1, units=5, preferred_tutor_id=None)
+        for i in range(10)
+    ]
+    tutors = [_tutor(1, {(1, GRADE, 5)}), _tutor(2, {(1, GRADE, 5)})]
+    result = plan_assignments(entities, tutors, {})
+    assert result.assigned_count == 10
+    assert not result.shortfalls
+    assert tutors[0].load == 5
+    assert tutors[1].load == 5
+
+
+def test_honors_preferred_even_when_busier() -> None:
+    """An explicit preferred tutor wins even when another tutor has fewer hours."""
+    entities = [
+        _entity(1, subject_id=1, units=5, hours=2, preferred_tutor_id=1),
+    ]
+    tutors = [_tutor(1, {(1, GRADE, 5)}), _tutor(2, {(1, GRADE, 5)})]
+    tutors[0].load = 8
+    result = plan_assignments(entities, tutors, {})
+    assert result.assigned_count == 2
+    assert all(a.tutor_id == 1 for a in result.assignments)
+    assert tutors[0].load == 10
+    assert tutors[1].load == 0
+
+
 def test_respects_grade_and_units_qualification() -> None:
     entities = [
         _entity(1, subject_id=1, units=5, grade="י\"א"),

@@ -505,3 +505,41 @@ def test_auto_assign_keeps_compact_day_for_student_in_two_subjects(seeded) -> No
 
         for day, hours in hours_by_day.items():
             assert _gap_count_hours(hours) == 0, f"gap on day {day}: {hours}"
+
+
+def test_demo_seed_balances_load_and_honors_preferences() -> None:
+    """Demo data should spread tutor hours and keep explicit preferred tutors."""
+    from collections import defaultdict
+
+    from scripts.seed_local_demo import seed_demo_data
+
+    result = seed_demo_data()
+    loads = dict(result["tutor_loads"])  # type: ignore[arg-type]
+    assert not result["unassigned"]
+    assert max(loads.values()) - min(loads.values()) <= 5
+
+    with session_scope() as session:
+        entity_tutors: dict[tuple[str, int], set[int]] = defaultdict(set)
+        for slot in session.scalars(select(ScheduleSlot)).all():
+            entity_tutors[slot.entity_key].add(slot.tutor_id)
+
+        preferred_entities = 0
+        for student in session.scalars(
+            select(Student).where(Student.study_group_id.is_(None))
+        ).all():
+            if not student.subject.weekly_hours or not student.preferred_tutor_id:
+                continue
+            key = (EntityType.STUDENT.value, student.id)
+            assert entity_tutors.get(key) == {student.preferred_tutor_id}
+            preferred_entities += 1
+
+        from app.models import StudyGroup
+
+        for group in session.scalars(select(StudyGroup)).all():
+            if not group.subject.weekly_hours or not group.preferred_tutor_id:
+                continue
+            key = (EntityType.GROUP.value, group.id)
+            assert entity_tutors.get(key) == {group.preferred_tutor_id}
+            preferred_entities += 1
+
+    assert preferred_entities == 6

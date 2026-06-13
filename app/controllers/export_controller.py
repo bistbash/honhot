@@ -153,6 +153,15 @@ class ExportController:
     def _build_student_sheets(
         students: list[Student], slots: list[ScheduleSlot]
     ) -> list[ScheduleSheet]:
+        persons: dict[str, list[Student]] = {}
+        for student in students:
+            persons.setdefault(student.national_id, []).append(student)
+
+        student_ids_by_nid: dict[str, set[int]] = {
+            national_id: {s.id for s in group}
+            for national_id, group in persons.items()
+        }
+
         group_members: dict[int, set[int]] = {}
         for slot in slots:
             if slot.study_group_id is None or slot.study_group is None:
@@ -164,27 +173,42 @@ class ExportController:
                 member_ids.add(member.id)
 
         sheets: list[ScheduleSheet] = []
-        for student in students:
+        for national_id, person_students in sorted(
+            persons.items(), key=lambda item: item[1][0].name
+        ):
+            person_student_ids = student_ids_by_nid[national_id]
             cells: dict[str, list[LessonBlock]] = {}
             for slot in slots:
                 assigned = (
                     slot.entity_type == EntityType.STUDENT
-                    and slot.student_id == student.id
+                    and slot.student_id in person_student_ids
                 ) or (
                     slot.study_group_id is not None
-                    and student.id in group_members.get(slot.study_group_id, set())
+                    and bool(
+                        person_student_ids
+                        & group_members.get(slot.study_group_id, set())
+                    )
                 )
                 if not assigned:
                     continue
                 key = cell_key(slot.day, slot.hour)
-                cells[key] = [ExportController._lesson_from_slot(slot)]
+                cells.setdefault(key, []).append(
+                    ExportController._lesson_from_slot(slot)
+                )
+
+            representative = min(person_students, key=lambda s: s.id)
+            label = (
+                f"{representative.name} "
+                f"({representative.grade}{representative.class_number}) · "
+                f"ת.ז. {national_id}"
+            )
             sheets.append(
                 ScheduleSheet(
-                    id=student.id,
-                    name=student.display_label,
+                    id=int(national_id),
+                    name=label,
                     kind="student",
                     cells=cells,
-                    national_id=student.national_id,
+                    national_id=national_id,
                 )
             )
         return sheets
