@@ -50,7 +50,9 @@ class EntitySidebar(QListWidget):
                 and entity.scheduled_count >= entity.required_hours
             )
 
-            if not entity.assignable:
+            if fully_scheduled:
+                item.setForeground(Qt.GlobalColor.gray)
+            elif not entity.assignable:
                 item.setForeground(QBrush(_UNQUALIFIED_COLOR))
                 item.setToolTip(
                     f"החונכת הנבחרת אינה מוסמכת ל{entity.subject_name}"
@@ -58,8 +60,6 @@ class EntitySidebar(QListWidget):
                 flags = item.flags()
                 flags &= ~Qt.ItemFlag.ItemIsDragEnabled
                 item.setFlags(flags)
-            elif fully_scheduled:
-                item.setForeground(Qt.GlobalColor.gray)
             self.addItem(item)
 
     def _on_selection_changed(self) -> None:

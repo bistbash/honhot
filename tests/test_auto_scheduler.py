@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.config import DAYS, HOURS
+from app.config import DAYS, HOURS, TUTOR_PREFERRED_MAX_CONSECUTIVE
 from app.services.auto_scheduler import (
     EntityCandidate,
     TutorState,
@@ -46,6 +46,22 @@ def _tutor(
     )
 
 
+def _max_tutor_streak_on_day(assignments, tutor_id: int, day: int) -> int:
+    hours = {a.hour for a in assignments if a.tutor_id == tutor_id and a.day == day}
+    if not hours:
+        return 0
+    sorted_h = sorted(hours)
+    run = 1
+    best_run = 1
+    for i in range(1, len(sorted_h)):
+        if sorted_h[i] - sorted_h[i - 1] == 1:
+            run += 1
+            best_run = max(best_run, run)
+        else:
+            run = 1
+    return best_run
+
+
 def test_balances_load_across_two_tutors() -> None:
     entities = [_entity(i, subject_id=1, units=5) for i in range(10)]
     tutors = [_tutor(1, {(1, GRADE, 5)}), _tutor(2, {(1, GRADE, 5)})]
@@ -78,14 +94,16 @@ def test_multiple_weekly_hours_assigned_distinct_cells() -> None:
     assert len(cells) == 3
 
 
-def test_multiple_hours_placed_in_consecutive_same_day_block() -> None:
+def test_multiple_hours_spread_across_days_for_tutor_comfort() -> None:
     entities = [_entity(1, subject_id=1, units=5, hours=3)]
     tutors = [_tutor(1, {(1, GRADE, 5)})]
     result = plan_assignments(entities, tutors, {})
-    days = [a.day for a in result.assignments]
-    hours = sorted(a.hour for a in result.assignments)
-    assert len(set(days)) == 1
-    assert hours[-1] - hours[0] + 1 == 3
+    days = {a.day for a in result.assignments}
+    assert len(days) >= 2
+    for day in days:
+        assert _max_tutor_streak_on_day(result.assignments, 1, day) <= (
+            TUTOR_PREFERRED_MAX_CONSECUTIVE + 1
+        )
 
 
 def test_cross_subject_same_person_forms_compact_day_block() -> None:
@@ -102,6 +120,35 @@ def test_cross_subject_same_person_forms_compact_day_block() -> None:
     assert len(days) == 1
     assigned_hours = sorted(a.hour for a in result.assignments)
     assert assigned_hours[1] - assigned_hours[0] == 1
+
+
+def test_tutor_spreads_multiple_entities_across_days() -> None:
+    entities = [_entity(i, subject_id=1, units=5, hours=2) for i in range(4)]
+    tutors = [_tutor(1, {(1, GRADE, 5)})]
+    result = plan_assignments(entities, tutors, {})
+    assert result.assigned_count == 8
+    assert not result.shortfalls
+    days = {a.day for a in result.assignments}
+    assert len(days) >= 3
+    for day in range(len(DAYS)):
+        streak = _max_tutor_streak_on_day(result.assignments, 1, day)
+        assert streak <= TUTOR_PREFERRED_MAX_CONSECUTIVE
+
+
+def test_tutor_max_two_consecutive_when_alternative_exists() -> None:
+    # Hours 0-4 on day 0 and 0-4 on day 1 — enough to avoid 3-in-a-row.
+    free = {(0, h) for h in range(5)} | {(1, h) for h in range(5)}
+    entities = [_entity(1, subject_id=1, units=5, hours=3)]
+    tutors = [_tutor(1, {(1, GRADE, 5)}, free=free)]
+    result = plan_assignments(entities, tutors, {})
+    assert result.assigned_count == 3
+    assert _max_tutor_streak_on_day(result.assignments, 1, 0) <= (
+        TUTOR_PREFERRED_MAX_CONSECUTIVE
+    )
+
+
+def test_same_person_cross_subject_still_same_day() -> None:
+    test_cross_subject_same_person_forms_compact_day_block()
 
 
 def test_preferred_tutor_kept_when_filling_missing_hours() -> None:

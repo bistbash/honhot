@@ -488,6 +488,7 @@ class ScheduleController:
                         name=tutor.name,
                         qualifications=quals,
                         free_cells=free,
+                        occupied_cells=set(occupied),
                         load=len(occupied),
                     )
                 )

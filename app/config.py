@@ -24,6 +24,9 @@ HOUR_MIN: Final[int] = 0
 HOUR_MAX: Final[int] = 10
 HOURS: Final[list[int]] = list(range(HOUR_MIN, HOUR_MAX + 1))
 
+# Soft preference for auto-scheduler: avoid tutor teaching streaks longer than this.
+TUTOR_PREFERRED_MAX_CONSECUTIVE: Final[int] = 2
+
 # --- Student domain values ----------------------------------------------------
 # Canonical grade labels (שכבה) with correct gershayim/geresh punctuation.
 GRADE_TET: Final[str] = "ט'"

@@ -11,9 +11,11 @@ Heuristic
    constrained first within each person, so hard-to-place entities get first pick.
 2. **Continuity** - try to give all of an entity's weekly hours to a single
    tutor (preferring the tutor already teaching that person or entity).
-3. **Compact blocks** - place hours in consecutive slots on the same day when
-   possible, extending an existing daily block for that person to minimise gaps.
-4. **Balance** - when continuity is impossible, fill hour-by-hour, always
+3. **Person comfort** - when the same person already has lessons on a day,
+   extend that day's block to minimise gaps between their subjects.
+4. **Tutor comfort** - spread a tutor's hours across the week and avoid long
+   consecutive teaching streaks (soft limit, see ``TUTOR_PREFERRED_MAX_CONSECUTIVE``).
+5. **Balance** - when continuity is impossible, fill hour-by-hour, always
    choosing the least-loaded qualified tutor, which greedily minimises the
    maximum tutor load and yields a near-even spread of teaching hours.
 """
@@ -21,6 +23,8 @@ Heuristic
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
+from app.config import TUTOR_PREFERRED_MAX_CONSECUTIVE
 
 
 @dataclass(frozen=True)
@@ -48,6 +52,8 @@ class TutorState:
     qualifications: set[tuple[int, str, int]]
     # (day, hour) cells the tutor is available and not yet occupied.
     free_cells: set[tuple[int, int]]
+    # (day, hour) cells already assigned to this tutor.
+    occupied_cells: set[tuple[int, int]] = field(default_factory=set)
     load: int = 0
 
     def can_teach(self, entity: "EntityCandidate") -> bool:
@@ -107,13 +113,83 @@ def _person_day_hours(
     return {hour for d, hour in person_occupied if d == day}
 
 
-def _select_cells_compact(
+def _tutor_day_hours(occupied: set[tuple[int, int]], day: int) -> int:
+    return sum(1 for d, _ in occupied if d == day)
+
+
+def _tutor_distinct_days(occupied: set[tuple[int, int]]) -> int:
+    return len({d for d, _ in occupied})
+
+
+def _tutor_consecutive_streak(
+    occupied: set[tuple[int, int]], day: int, hour: int
+) -> int:
+    """Return consecutive teaching streak on ``day`` after adding ``hour``."""
+    hours_on_day = {h for d, h in occupied if d == day} | {hour}
+    sorted_hours = sorted(hours_on_day)
+    runs: list[list[int]] = []
+    current = [sorted_hours[0]]
+    for h in sorted_hours[1:]:
+        if h - current[-1] == 1:
+            current.append(h)
+        else:
+            runs.append(current)
+            current = [h]
+    runs.append(current)
+    for run in runs:
+        if hour in run:
+            return len(run)
+    return 1
+
+
+def _tutor_streak_penalty(streak: int, preferred_max: int) -> int:
+    if streak <= preferred_max:
+        return 0
+    return streak - preferred_max
+
+
+def _cell_score(
+    day: int,
+    hour: int,
+    person_occupied: set[tuple[int, int]],
+    person_baseline: set[tuple[int, int]],
+    tutor_occupied: set[tuple[int, int]],
+    preferred_max_consecutive: int,
+) -> tuple[int, int, int, int, int, int, int]:
+    """Lexicographic score for picking a cell (lower is better)."""
+    baseline_on_day = _person_day_hours(person_baseline, day)
+    tutor_day_count = _tutor_day_hours(tutor_occupied, day)
+
+    # Only honour person day-continuity from hours scheduled before this entity.
+    person_has_day = 0 if baseline_on_day else 1
+    combined = baseline_on_day | {hour}
+    person_gaps = _gap_count(combined) if baseline_on_day else 0
+
+    streak = _tutor_consecutive_streak(tutor_occupied, day, hour)
+    streak_penalty = _tutor_streak_penalty(streak, preferred_max_consecutive)
+    tutor_new_day = 0 if tutor_day_count == 0 else 1
+
+    return (
+        person_has_day,
+        person_gaps,
+        tutor_day_count,
+        streak_penalty,
+        tutor_new_day,
+        day,
+        hour,
+    )
+
+
+def _select_cells_scored(
     feasible: set[tuple[int, int]],
     count: int,
     person_occupied: set[tuple[int, int]],
+    person_baseline: set[tuple[int, int]],
+    tutor_occupied: set[tuple[int, int]],
     used_cells: set[tuple[int, int]],
+    preferred_max_consecutive: int = TUTOR_PREFERRED_MAX_CONSECUTIVE,
 ) -> list[tuple[int, int]]:
-    """Pick up to ``count`` cells, preferring compact same-day blocks."""
+    """Pick up to ``count`` cells, balancing person and tutor comfort."""
     if count <= 0:
         return []
 
@@ -122,54 +198,37 @@ def _select_cells_compact(
         return []
 
     chosen: list[tuple[int, int]] = []
+    local_tutor = set(tutor_occupied)
     remaining = count
-    local_person = set(person_occupied)
 
     while remaining > 0:
         pool = sorted(available)
         if not pool:
             break
 
-        by_day: dict[int, list[int]] = {}
-        for day, hour in pool:
-            by_day.setdefault(day, []).append(hour)
-        for hours in by_day.values():
-            hours.sort()
-
-        best_block: list[tuple[int, int]] | None = None
+        best_cell: tuple[int, int] | None = None
         best_score: tuple | None = None
 
-        for day in sorted(by_day):
-            day_hours = by_day[day]
-            person_on_day = _person_day_hours(local_person, day)
-            max_size = min(remaining, len(day_hours))
+        for day, hour in pool:
+            score = _cell_score(
+                day,
+                hour,
+                person_occupied,
+                person_baseline,
+                local_tutor,
+                preferred_max_consecutive,
+            )
+            if best_score is None or score < best_score:
+                best_score = score
+                best_cell = (day, hour)
 
-            for size in range(max_size, 0, -1):
-                for start in range(len(day_hours) - size + 1):
-                    block_hours = day_hours[start : start + size]
-                    if block_hours[-1] - block_hours[0] + 1 != size:
-                        continue
-                    combined = person_on_day | set(block_hours)
-                    score = (
-                        0 if person_on_day else 1,
-                        _gap_count(combined),
-                        -size,
-                        day,
-                        block_hours[0],
-                    )
-                    if best_score is None or score < best_score:
-                        best_score = score
-                        best_block = [(day, hour) for hour in block_hours]
+        if best_cell is None:
+            break
 
-        if best_block is None:
-            day, hour = pool[0]
-            best_block = [(day, hour)]
-
-        for cell in best_block:
-            chosen.append(cell)
-            available.discard(cell)
-            local_person.add(cell)
-        remaining -= len(best_block)
+        chosen.append(best_cell)
+        available.discard(best_cell)
+        local_tutor.add(best_cell)
+        remaining -= 1
 
     return chosen
 
@@ -186,6 +245,55 @@ def _tutor_sort_key(
         tutor.name,
         tutor.tutor_id,
     )
+
+
+def _phase2_pick(
+    candidates: list[TutorState],
+    feasible_for,
+    person_cells: set[tuple[int, int]],
+    person_baseline: set[tuple[int, int]],
+    used_cells: set[tuple[int, int]],
+    preferred_tutor_id: int | None,
+    person_tutor_id: int | None,
+) -> tuple[TutorState, tuple[int, int]] | None:
+    """Choose the best (tutor, cell) pair for one hour of Phase-2 fill."""
+    best_key: tuple | None = None
+    best_tutor: TutorState | None = None
+    best_cell: tuple[int, int] | None = None
+
+    for tutor in candidates:
+        cells = _select_cells_scored(
+            feasible_for(tutor),
+            1,
+            person_cells,
+            person_baseline,
+            tutor.occupied_cells,
+            used_cells,
+        )
+        if not cells:
+            continue
+        cell = cells[0]
+        day, hour = cell
+        key = (
+            *_tutor_sort_key(tutor, preferred_tutor_id, person_tutor_id)[:2],
+            tutor.load,
+            *_cell_score(
+                day,
+                hour,
+                person_cells,
+                person_baseline,
+                tutor.occupied_cells,
+                TUTOR_PREFERRED_MAX_CONSECUTIVE,
+            ),
+        )
+        if best_key is None or key < best_key:
+            best_key = key
+            best_tutor = tutor
+            best_cell = cell
+
+    if best_tutor is None or best_cell is None:
+        return None
+    return best_tutor, best_cell
 
 
 def plan_assignments(
@@ -242,6 +350,7 @@ def plan_assignments(
         used_cells: set[tuple[int, int]] = set()
         remaining = entity.required_hours
         person_cells = person_occupied.setdefault(entity.person_key, set())
+        person_baseline = set(person_cells)
         person_tutor_id = person_tutor.get(entity.person_key)
 
         def feasible_for(tutor: TutorState) -> set[tuple[int, int]]:
@@ -250,6 +359,7 @@ def plan_assignments(
 
         def commit(tutor: TutorState, cell: tuple[int, int]) -> None:
             tutor.free_cells.discard(cell)
+            tutor.occupied_cells.add(cell)
             tutor.load += 1
             used_cells.add(cell)
             person_cells.add(cell)
@@ -272,8 +382,13 @@ def plan_assignments(
                 t, entity.preferred_tutor_id, person_tutor_id
             ),
         ):
-            cells = _select_cells_compact(
-                feasible_for(tutor), remaining, person_cells, used_cells
+            cells = _select_cells_scored(
+                feasible_for(tutor),
+                remaining,
+                person_cells,
+                person_baseline,
+                tutor.occupied_cells,
+                used_cells,
             )
             if len(cells) == remaining:
                 for cell in cells:
@@ -283,28 +398,18 @@ def plan_assignments(
 
         # Phase 2: balanced fill across tutors, one hour at a time.
         while remaining > 0:
-            best_tutor: TutorState | None = None
-            best_cell: tuple[int, int] | None = None
-            for tutor in sorted(
+            pick = _phase2_pick(
                 candidates,
-                key=lambda t: (
-                    *_tutor_sort_key(
-                        t, entity.preferred_tutor_id, person_tutor.get(entity.person_key)
-                    )[:2],
-                    t.load,
-                    len(t.free_cells),
-                    t.name,
-                    t.tutor_id,
-                ),
-            ):
-                cells = _select_cells_compact(
-                    feasible_for(tutor), 1, person_cells, used_cells
-                )
-                if cells:
-                    best_tutor, best_cell = tutor, cells[0]
-                    break
-            if best_tutor is None or best_cell is None:
+                feasible_for,
+                person_cells,
+                person_baseline,
+                used_cells,
+                entity.preferred_tutor_id,
+                person_tutor.get(entity.person_key),
+            )
+            if pick is None:
                 break
+            best_tutor, best_cell = pick
             commit(best_tutor, best_cell)
             remaining -= 1
 

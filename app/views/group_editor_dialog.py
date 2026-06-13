@@ -15,10 +15,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.controllers.grouping_controller import GroupingController
+from app.controllers.grouping_controller import GroupingController, student_group_compatible
 from app.database import session_scope
 from app.models import Student
 from sqlalchemy import select
+
+_ROLE_ID = Qt.ItemDataRole.UserRole
+_ROLE_GRADE = Qt.ItemDataRole.UserRole + 1
+_ROLE_UNITS = Qt.ItemDataRole.UserRole + 2
 
 
 class GroupEditorDialog(QDialog):
@@ -79,6 +83,9 @@ class GroupEditorDialog(QDialog):
 
         self.count_label = QLabel("")
         layout.addWidget(self.count_label)
+        self.filter_label = QLabel("")
+        self.filter_label.setWordWrap(True)
+        layout.addWidget(self.filter_label)
         self.list.itemChanged.connect(self._update_count)
 
         buttons = QDialogButtonBox(
@@ -93,7 +100,9 @@ class GroupEditorDialog(QDialog):
 
     def _add_item(self, student: dict, checked: bool) -> None:
         item = QListWidgetItem(student["label"])
-        item.setData(Qt.ItemDataRole.UserRole, student["id"])
+        item.setData(_ROLE_ID, student["id"])
+        item.setData(_ROLE_GRADE, student["grade"])
+        item.setData(_ROLE_UNITS, student["units"])
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         item.setCheckState(
             Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
@@ -119,7 +128,39 @@ class GroupEditorDialog(QDialog):
 
     def _update_count(self) -> None:
         self.count_label.setText(f"נבחרו {len(self.selected_member_ids())} תלמידים")
+        self._apply_list_filter()
         self._refresh_tutor_combo()
+
+    def _anchor_grade_units(self) -> tuple[str | None, int | None]:
+        for row in range(self.list.count()):
+            item = self.list.item(row)
+            if item.checkState() == Qt.CheckState.Checked:
+                return str(item.data(_ROLE_GRADE)), int(item.data(_ROLE_UNITS))
+        if self._group_grade is not None and self._group_units is not None:
+            return self._group_grade, self._group_units
+        return None, None
+
+    def _apply_list_filter(self) -> None:
+        grade, units = self._anchor_grade_units()
+        if grade is None or units is None:
+            for row in range(self.list.count()):
+                self.list.item(row).setHidden(False)
+            self.filter_label.setText("")
+            return
+
+        for row in range(self.list.count()):
+            item = self.list.item(row)
+            checked = item.checkState() == Qt.CheckState.Checked
+            student = {
+                "grade": item.data(_ROLE_GRADE),
+                "units": item.data(_ROLE_UNITS),
+            }
+            matches = student_group_compatible(student, grade, units)
+            item.setHidden(not checked and not matches)
+
+        self.filter_label.setText(
+            f'מוצגים רק תלמידים עם שכבה {grade} ו-{units} יח"ל'
+        )
 
     def _refresh_tutor_combo(self) -> None:
         grade, units = self._resolve_grade_units()
@@ -166,7 +207,7 @@ class GroupEditorDialog(QDialog):
         for row in range(self.list.count()):
             item = self.list.item(row)
             if item.checkState() == Qt.CheckState.Checked:
-                ids.append(int(item.data(Qt.ItemDataRole.UserRole)))
+                ids.append(int(item.data(_ROLE_ID)))
         return ids
 
     def group_name(self) -> str:

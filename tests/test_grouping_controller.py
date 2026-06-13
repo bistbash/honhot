@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from app.controllers.grouping_controller import GroupingController
+from app.controllers.grouping_controller import (
+    GroupingController,
+    filter_group_compatible,
+    student_group_compatible,
+)
 from app.database import session_scope
 from app.models import Student, Subject
 
@@ -127,3 +131,16 @@ def test_set_group_details_updates_name_and_tutor() -> None:
     assert group is not None
     assert group["name"] == "שם חדש"
     assert group["preferred_tutor_id"] == tutor_id
+
+
+def test_filter_group_compatible_matches_grade_and_units() -> None:
+    students = [
+        {"id": 1, "grade": GRADE, "units": 5, "study_level": 4},
+        {"id": 2, "grade": GRADE, "units": 5, "study_level": 3},
+        {"id": 3, "grade": "י'", "units": 4, "study_level": 3},
+        {"id": 4, "grade": GRADE, "units": 4, "study_level": 3},
+    ]
+    matched = filter_group_compatible(students, GRADE, 5)
+    assert {s["id"] for s in matched} == {1, 2}
+    assert student_group_compatible(students[1], GRADE, 5)
+    assert not student_group_compatible(students[2], GRADE, 5)

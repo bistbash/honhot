@@ -333,7 +333,7 @@ MANUAL_GROUPS: list[tuple[str, str, list[str], str | None]] = [
     (
         "english",
         "אנגלית מתקדמים י\"ב",
-        ["יעל פרץ", "איתי קרמר", "נועה בר"],
+        ["יעל פרץ", "איתי קרמר", "נועה בר", "ליאור בן שמואל"],
         "אדר",
     ),
     (
@@ -363,7 +363,12 @@ SUBJECT_CONFIG: dict[str, dict] = {
         "weekly_hours": 2,
         "windows": {(day, hour) for day in range(5) for hour in (2, 3, 4, 5, 7, 8, 9)},
         "auto_group_max_size": 4,
-        "skip_auto_group_names": {"יעל פרץ", "איתי קרמר", "נועה בר"},
+        "skip_auto_group_names": {
+            "יעל פרץ",
+            "איתי קרמר",
+            "נועה בר",
+            "ליאור בן שמואל",
+        },
     },
     "history": {
         "name": "היסטוריה",
@@ -552,16 +557,17 @@ def _group_all_remaining(subject_id: int, max_size: int = 4) -> int:
         ungrouped = grouping.list_ungrouped_students(subject_id)
         if not ungrouped:
             break
-        buckets: dict[tuple[str, int, int], list[dict]] = {}
+        buckets: dict[tuple[str, int], list[dict]] = {}
         for student in ungrouped:
-            key = (student["grade"], student["units"], student["study_level"])
+            key = (student["grade"], student["units"])
             buckets.setdefault(key, []).append(student)
         progress = False
         for key, members in sorted(buckets.items()):
             if len(members) < 2:
                 continue
             chunk = members[:max_size]
-            grade, units, level = key
+            grade, units = key
+            level = chunk[0]["study_level"]
             name = f"קבוצה {grade} · {units} יח\"ל · רמה {level}"
             grouping.create_manual_group(
                 subject_id, name, [m["id"] for m in chunk]
@@ -715,6 +721,8 @@ def _print_summary(result: dict[str, object]) -> None:
         print(f"  לא שובצו ({len(unassigned)}): {', '.join(unassigned[:8])}")
         if len(unassigned) > 8:
             print(f"    ... ועוד {len(unassigned) - 8}")
+    else:
+        print("  שיבוץ מלא — כל הקבוצות והתלמידים שובצו")
     print()
     print("הפעל את האפליקציה:")
     print("  .venv/bin/python main.py")

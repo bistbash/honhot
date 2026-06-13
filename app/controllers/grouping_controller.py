@@ -32,6 +32,18 @@ def _student_dict(student: Student) -> dict:
     }
 
 
+def student_group_compatible(student: dict, grade: str, units: int) -> bool:
+    """Return whether a student can join a group with the given grade and units."""
+    return student["grade"] == grade and student["units"] == units
+
+
+def filter_group_compatible(
+    students: list[dict], grade: str, units: int
+) -> list[dict]:
+    """Return students that share the given grade and units."""
+    return [s for s in students if student_group_compatible(s, grade, units)]
+
+
 def _validate_uniform(students: list[Student]) -> tuple[str, int, int]:
     """Ensure students share grade + units; return (grade, units, level).
 
