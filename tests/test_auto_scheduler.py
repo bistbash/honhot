@@ -20,8 +20,11 @@ def _entity(
     grade: str = GRADE,
     hours: int = 1,
     person_key: str | None = None,
+    person_keys: frozenset[str] | None = None,
     preferred_tutor_id: int | None = None,
 ) -> EntityCandidate:
+    pk = person_key or f"student{i}"
+    keys = person_keys if person_keys is not None else frozenset({pk})
     return EntityCandidate(
         entity_type="student",
         entity_id=i,
@@ -29,7 +32,8 @@ def _entity(
         grade=grade,
         units=units,
         label=f"student{i}",
-        person_key=person_key or f"student{i}",
+        person_key=pk,
+        person_keys=keys,
         required_hours=hours,
         preferred_tutor_id=preferred_tutor_id,
     )
@@ -94,23 +98,24 @@ def test_multiple_weekly_hours_assigned_distinct_cells() -> None:
     assert len(cells) == 3
 
 
-def test_multiple_hours_spread_across_days_for_tutor_comfort() -> None:
+def test_multiple_hours_form_compact_block_for_same_entity() -> None:
+    """Multiple weekly hours for one entity form one consecutive day block."""
     entities = [_entity(1, subject_id=1, units=5, hours=3)]
     tutors = [_tutor(1, {(1, GRADE, 5)})]
     result = plan_assignments(entities, tutors, {})
     days = {a.day for a in result.assignments}
-    assert len(days) >= 2
-    for day in days:
-        assert _max_tutor_streak_on_day(result.assignments, 1, day) <= (
-            TUTOR_PREFERRED_MAX_CONSECUTIVE + 1
-        )
+    assert len(days) == 1
+    hours = sorted(a.hour for a in result.assignments)
+    assert hours[1] - hours[0] == 1
+    assert hours[2] - hours[1] == 1
 
 
 def test_cross_subject_same_person_forms_compact_day_block() -> None:
-    person = "דני|י\"א|2"
+    person = 'דני|י"א|2'
+    person_keys = frozenset({person})
     entities = [
-        _entity(1, subject_id=1, units=5, hours=1, person_key=person),
-        _entity(2, subject_id=2, units=5, hours=1, person_key=person),
+        _entity(1, subject_id=1, units=5, hours=1, person_key=person, person_keys=person_keys),
+        _entity(2, subject_id=2, units=5, hours=1, person_key=person, person_keys=person_keys),
     ]
     tutors = [_tutor(1, {(1, GRADE, 5), (2, GRADE, 5)})]
     result = plan_assignments(entities, tutors, {})
@@ -136,15 +141,15 @@ def test_tutor_spreads_multiple_entities_across_days() -> None:
 
 
 def test_tutor_max_two_consecutive_when_alternative_exists() -> None:
-    # Hours 0-4 on day 0 and 0-4 on day 1 — enough to avoid 3-in-a-row.
+    # Compact-day priority keeps three hours for one entity on a single day.
     free = {(0, h) for h in range(5)} | {(1, h) for h in range(5)}
     entities = [_entity(1, subject_id=1, units=5, hours=3)]
     tutors = [_tutor(1, {(1, GRADE, 5)}, free=free)]
     result = plan_assignments(entities, tutors, {})
     assert result.assigned_count == 3
-    assert _max_tutor_streak_on_day(result.assignments, 1, 0) <= (
-        TUTOR_PREFERRED_MAX_CONSECUTIVE
-    )
+    assert len({a.day for a in result.assignments}) == 1
+    hours = sorted(a.hour for a in result.assignments)
+    assert hours[2] - hours[0] == 2
 
 
 def test_same_person_cross_subject_still_same_day() -> None:
@@ -203,3 +208,69 @@ def test_two_entities_balanced_across_two_tutors_with_continuity() -> None:
     assert result.assigned_count == 6
     assert tutors[0].load == 3
     assert tutors[1].load == 3
+
+
+def test_avoids_gapped_same_day_when_clean_day_exists() -> None:
+    person = 'דני|י"א|2'
+    person_keys = frozenset({person})
+    entities = [
+        _entity(2, subject_id=2, units=5, hours=1, person_key=person, person_keys=person_keys),
+    ]
+    tutors = [_tutor(1, {(1, GRADE, 5), (2, GRADE, 5)})]
+    person_occupied = {person: {(0, 1)}}
+    result = plan_assignments(
+        entities, tutors, {}, person_occupied=person_occupied
+    )
+    assert result.assigned_count == 1
+    assignment = result.assignments[0]
+    assert assignment.day != 0 or assignment.hour in {0, 2}
+
+
+def test_multi_hour_entity_consecutive_on_same_day() -> None:
+    entities = [_entity(1, subject_id=1, units=5, hours=3)]
+    tutors = [_tutor(1, {(1, GRADE, 5)})]
+    result = plan_assignments(entities, tutors, {})
+    assert result.assigned_count == 3
+    by_day: dict[int, list[int]] = {}
+    for assignment in result.assignments:
+        by_day.setdefault(assignment.day, []).append(assignment.hour)
+    for hours in by_day.values():
+        if len(hours) > 1:
+            sorted_hours = sorted(hours)
+            for i in range(1, len(sorted_hours)):
+                assert sorted_hours[i] - sorted_hours[i - 1] == 1
+
+
+def test_group_members_share_person_schedule() -> None:
+    person = 'דני|י"א|2'
+    person_keys = frozenset({person})
+    entities = [
+        EntityCandidate(
+            entity_type="group",
+            entity_id=1,
+            subject_id=1,
+            grade=GRADE,
+            units=5,
+            label="math group",
+            person_key=person,
+            person_keys=person_keys,
+            required_hours=1,
+        ),
+        EntityCandidate(
+            entity_type="group",
+            entity_id=2,
+            subject_id=2,
+            grade=GRADE,
+            units=5,
+            label="english group",
+            person_key=person,
+            person_keys=person_keys,
+            required_hours=1,
+        ),
+    ]
+    tutors = [_tutor(1, {(1, GRADE, 5), (2, GRADE, 5)})]
+    result = plan_assignments(entities, tutors, {})
+    assert result.assigned_count == 2
+    assert len({a.day for a in result.assignments}) == 1
+    assigned_hours = sorted(a.hour for a in result.assignments)
+    assert assigned_hours[1] - assigned_hours[0] == 1

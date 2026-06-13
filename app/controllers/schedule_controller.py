@@ -449,6 +449,11 @@ class ScheduleController:
             students_by_id = {
                 s.id: s for s in session.scalars(select(Student)).all()
             }
+            group_member_keys: dict[int, frozenset[str]] = {}
+            for group in session.scalars(select(StudyGroup)).all():
+                group_member_keys[group.id] = frozenset(
+                    self._student_person_key(member) for member in group.members
+                )
             for slot in session.scalars(select(ScheduleSlot)).all():
                 occupied_by_tutor.setdefault(slot.tutor_id, set()).add(
                     (slot.day, slot.hour)
@@ -461,12 +466,19 @@ class ScheduleController:
                 ] = entity_tutor_counts.get(slot.entity_key, {}).get(
                     slot.tutor_id, 0
                 ) + 1
-                person_key = self._slot_person_key(slot, students_by_id)
-                if person_key is not None:
-                    person_occupied.setdefault(person_key, set()).add(
-                        (slot.day, slot.hour)
-                    )
-                    person_tutor[person_key] = slot.tutor_id
+                cell = (slot.day, slot.hour)
+                if slot.student_id is not None:
+                    student = students_by_id.get(slot.student_id)
+                    if student is not None:
+                        person_key = self._student_person_key(student)
+                        person_occupied.setdefault(person_key, set()).add(cell)
+                        person_tutor[person_key] = slot.tutor_id
+                elif slot.study_group_id is not None:
+                    for person_key in group_member_keys.get(
+                        slot.study_group_id, frozenset()
+                    ):
+                        person_occupied.setdefault(person_key, set()).add(cell)
+                        person_tutor[person_key] = slot.tutor_id
 
             # Build tutor states for qualified tutors. Qualifications expand a
             # (subject, grade, units range) row into discrete (subject, grade,
@@ -525,6 +537,7 @@ class ScheduleController:
                 remaining = _remaining(key, weekly)
                 if remaining <= 0:
                     continue
+                student_key = self._student_person_key(student)
                 entities.append(
                     EntityCandidate(
                         entity_type=EntityType.STUDENT.value,
@@ -533,7 +546,8 @@ class ScheduleController:
                         grade=student.grade,
                         units=student.units,
                         label=student.display_label,
-                        person_key=self._student_person_key(student),
+                        person_key=student_key,
+                        person_keys=frozenset({student_key}),
                         required_hours=remaining,
                         preferred_tutor_id=_resolve_preferred(
                             student.preferred_tutor_id, key
@@ -548,6 +562,7 @@ class ScheduleController:
                 remaining = _remaining(key, weekly)
                 if remaining <= 0:
                     continue
+                member_keys = group_member_keys.get(group.id, frozenset())
                 entities.append(
                     EntityCandidate(
                         entity_type=EntityType.GROUP.value,
@@ -556,7 +571,8 @@ class ScheduleController:
                         grade=group.grade,
                         units=group.units,
                         label=group.name,
-                        person_key=self._group_person_key(group.id),
+                        person_key=min(member_keys) if member_keys else "",
+                        person_keys=member_keys,
                         required_hours=remaining,
                         preferred_tutor_id=_resolve_preferred(
                             group.preferred_tutor_id, key

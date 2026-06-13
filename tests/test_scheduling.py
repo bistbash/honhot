@@ -426,3 +426,73 @@ def test_schedulable_entities_marks_unqualified_for_tutor(seeded) -> None:
     by_id = {e.entity_id: e for e in entities_for_tutor if e.entity_type == "student"}
     assert by_id[seeded["s1"]].assignable is True
     assert by_id[physics_student_id].assignable is False
+
+
+def _gap_count_hours(hours: list[int]) -> int:
+    if len(hours) <= 1:
+        return 0
+    sorted_hours = sorted(hours)
+    return sum(
+        sorted_hours[i + 1] - sorted_hours[i] - 1
+        for i in range(len(sorted_hours) - 1)
+    )
+
+
+def test_auto_assign_keeps_compact_day_for_student_in_two_subjects(seeded) -> None:
+    """Same person in two subjects should not get gapped hours on the same day."""
+    from app.models import StudyGroup
+
+    subject_ctrl = SubjectController()
+    english_id = subject_ctrl.add_subject("אנגלית")
+    subject_ctrl.set_weekly_hours(english_id, 1)
+
+    TutorController().add_tutor_subject(
+        seeded["active"], english_id, [GRADE], units_min=5, units_max=5
+    )
+
+    with session_scope() as session:
+        math_student = session.get(Student, seeded["s1"])
+        assert math_student is not None
+        session.add(
+            Student(
+                name=math_student.name,
+                grade=math_student.grade,
+                class_number=math_student.class_number,
+                units=5,
+                study_level=4,
+                subject_id=english_id,
+            )
+        )
+
+    ScheduleController().auto_assign(clear_existing=True)
+
+    person_key = (
+        f"{math_student.name}|{math_student.grade}|{math_student.class_number}"
+    )
+
+    with session_scope() as session:
+        students_by_id = {s.id: s for s in session.scalars(select(Student)).all()}
+        group_member_keys: dict[int, frozenset[str]] = {}
+        for group in session.scalars(select(StudyGroup)).all():
+            group_member_keys[group.id] = frozenset(
+                f"{m.name}|{m.grade}|{m.class_number}" for m in group.members
+            )
+
+        hours_by_day: dict[int, list[int]] = {}
+        for slot in session.scalars(select(ScheduleSlot)).all():
+            affected: set[str] = set()
+            if slot.student_id is not None:
+                student = students_by_id.get(slot.student_id)
+                if student is not None:
+                    affected.add(
+                        f"{student.name}|{student.grade}|{student.class_number}"
+                    )
+            elif slot.study_group_id is not None:
+                affected |= group_member_keys.get(slot.study_group_id, frozenset())
+
+            if person_key not in affected:
+                continue
+            hours_by_day.setdefault(slot.day, []).append(slot.hour)
+
+        for day, hours in hours_by_day.items():
+            assert _gap_count_hours(hours) == 0, f"gap on day {day}: {hours}"
